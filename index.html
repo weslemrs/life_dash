@@ -2012,10 +2012,11 @@ function mudarMes(k) {
 }
 /** Saldo estimado de uma aplicação numa data: último "Saldo" informado + aportes/resgates depois dele. */
 function saldoEm(nome, ate) {
-  const ms = D.inv.filter(x => x.ativo === nome && x.d <= ate);
-  const ss = ms.filter(x => x.mov === 'Saldo').sort((a, b) => a.d < b.d ? -1 : 1), u = ss[ss.length - 1];
-  const base = u ? u.valor : 0, desde = u ? u.d : '';
-  return base + soma(ms.filter(x => x.mov !== 'Saldo' && x.d > desde), x => x.mov === 'Resgate' ? -x.valor : x.valor);
+  // em ordem de data e, no mesmo dia, na ordem em que foi registrado: aporte feito depois do saldo informado conta
+  const ms = D.inv.filter(x => x.ativo === nome && x.d <= ate).sort((a, b) => a.d !== b.d ? (a.d < b.d ? -1 : 1) : (a.row || 0) - (b.row || 0));
+  let u = -1; ms.forEach((x, i) => { if (x.mov === 'Saldo') u = i; });
+  const base = u >= 0 ? ms[u].valor : 0;
+  return base + soma(ms.slice(u + 1).filter(x => x.mov !== 'Saldo'), x => x.mov === 'Resgate' ? -x.valor : x.valor);
 }
 let verTodosLanc = false, limiteDin = 15;
 const ordenarLanc = a => a.slice().sort((x, y) => x.d !== y.d ? (x.d < y.d ? 1 : -1) : (y.row || 0) - (x.row || 0));
