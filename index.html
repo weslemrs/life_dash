@@ -1957,7 +1957,7 @@ function renderMetas() {
   }).join('') || '<div class="empty">Nenhuma avaliação próxima.</div>';
 
   const evs = VENDAS().filter(v => v.status !== 'Cancelado' && v.entrega && v.entrega >= h).sort((a, b) => (a.entrega + a.hora) < (b.entrega + b.hora) ? -1 : 1).slice(0, 6).map(v => `<div class="row lk" onclick="editarVendaUI('${v.id}')"><div><span class="t">${esc(v.cliente || v.desc || 'Venda')}</span><span class="tag">${esc(v.negocio)}</span>${v.status === 'Orçamento' ? '<span class="tag">orçamento</span>' : ''}
-      <div class="m">${ddmm(v.entrega)}${v.hora ? ' · ' + esc(v.hora) : ''}${v.status === 'Fechado' && faltaVenda(v) ? ' · a receber ' + brl0(faltaVenda(v)) : ''}</div>${v.local ? `<div>${linkLocal(v.local)}</div>` : ''}</div><div class="v">${brl0(v.valor)}</div></div>`).join('') || '<div class="empty">Nada agendado. Cadastre em Registrar › Negócios › Vendas, com a data do evento.</div>';
+      <div class="m">${ddmm(v.entrega)}${v.hora ? ' · ' + esc(v.hora) : ''}${v.status === 'Fechado' && faltaVenda(v) ? ' · a receber ' + brl0(faltaVenda(v)) : ''}</div>${v.local ? `<div>${linkLocal(v.local)}</div>` : ''}</div><div class="v">${brl0(v.valor)}</div></div>`).join('') || '<div class="empty">Nada agendado. Cadastre em Registrar › Finanças › Negócios › Vendas, com a data do evento.</div>';
 
   $('#tab-metas').innerHTML = `
   <div class="grid">
@@ -2119,15 +2119,29 @@ function renderFinancas() {
       <div class="kv"><span>Fatia da carteira</span><b>${totEst ? pct(a.estimado / totEst) : '—'}</b></div>
       <div class="bar"><i style="width:${totEst ? (a.estimado / totEst * 100).toFixed(1) : 0}%;background:${coresAp[k % coresAp.length]}"></i></div>
       <button class="mini ghost" style="margin-top:10px" onclick="movAp(${k})">Movimentar</button></div>`;
-  }).join('') || '<div class="card c12"><div class="empty">Nenhuma aplicação cadastrada. Cadastre em Registrar › Investir.</div></div>';
+  }).join('') || '<div class="card c12"><div class="empty">Nenhuma aplicação cadastrada. Cadastre em Registrar › Finanças › Investimento.</div></div>';
 
   const ordLanc = ordenarLanc(doMes);
   const lanc = (verTodosLanc ? ordLanc : ordLanc.slice(0, 8)).map(x => linhaLanc(x, false)).join('') || '<div class="empty">Sem lançamentos neste mês.</div>';
   const maisLanc = ordLanc.length > 8 ? `<button class="mini ghost" style="margin-top:12px" onclick="verTodosLanc=!verTodosLanc;renderFinancas();graficosFinancasRe()">${verTodosLanc ? 'Mostrar menos' : 'Ver todos (' + ordLanc.length + ')'}</button>` : '';
 
   const varSai = saiAnt > 0 ? sai / saiAnt - 1 : null;
+  const seletorFin = `<div class="card c12" style="padding:10px 12px"><div class="seg full" style="margin:0">${[['conta', 'Conta corrente'], ['inv', 'Investimentos']].map(x => `<button type="button" class="${finSel === x[0] ? 'on' : ''}" onclick="escolherFin('${x[0]}')">${x[1]}</button>`).join('')}</div></div>`;
+  if (finSel === 'inv') {
+    $('#tab-financas').innerHTML = `
+  <div class="grid">
+    ${seletorFin}
+    <div class="card kpi c4"><div class="lbl">Patrimônio hoje</div><div class="val">${brl0(totEst)}</div><div class="sub">${aps.length} aplicação(ões) · último saldo + movimentos</div></div>
+    <div class="card kpi c4"><div class="lbl">Aplicado líquido</div><div class="val">${brl0(totAp)}</div><div class="sub">aportes − resgates, desde o início</div></div>
+    <div class="card kpi c4"><div class="lbl">Rendimento acumulado</div><div class="val ${totRend < 0 ? 'neg' : 'pos'}">${totAp ? (totRend >= 0 ? '+' : '−') + ' ' + brl0(Math.abs(totRend)) : '—'}</div><div class="sub">${totAp ? pct(totRend / totAp, 2) + ' sobre o aplicado' : 'precisa de aportes'}</div></div>
+    ${apCards}
+    <div class="card c12"><h3>Evolução do patrimônio <small>fim de cada mês, por aplicação</small></h3><div class="chart"><canvas id="chInv"></canvas></div></div>
+  </div>`;
+    return;
+  }
   $('#tab-financas').innerHTML = `
   <div class="grid">
+    ${seletorFin}
     <div class="card c12" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px">
       <div class="kpi"><div class="lbl">Período</div></div>
       <div class="months"><button class="arrow" onclick="mudarMes(-1)" ${i <= 0 ? 'disabled' : ''} aria-label="Mês anterior">‹</button><b>${mesLbl(m).toUpperCase()}</b><button class="arrow" onclick="mudarMes(1)" ${i >= ms.length - 1 ? 'disabled' : ''} aria-label="Próximo mês">›</button></div>
@@ -2143,13 +2157,6 @@ function renderFinancas() {
 
     <div class="card c12"><h3>Entradas × saídas <small>12 meses</small></h3><div class="chart"><canvas id="chTrend"></canvas></div></div>
 
-    <div class="sect c12">Investimentos</div>
-    <div class="card kpi c4"><div class="lbl">Patrimônio hoje</div><div class="val">${brl0(totEst)}</div><div class="sub">${aps.length} aplicação(ões) · último saldo + movimentos</div></div>
-    <div class="card kpi c4"><div class="lbl">Aplicado líquido</div><div class="val">${brl0(totAp)}</div><div class="sub">aportes − resgates, desde o início</div></div>
-    <div class="card kpi c4"><div class="lbl">Rendimento acumulado</div><div class="val ${totRend < 0 ? 'neg' : 'pos'}">${totAp ? (totRend >= 0 ? '+' : '−') + ' ' + brl0(Math.abs(totRend)) : '—'}</div><div class="sub">${totAp ? pct(totRend / totAp, 2) + ' sobre o aplicado' : 'precisa de aportes'}</div></div>
-    ${apCards}
-    <div class="card c12"><h3>Evolução do patrimônio <small>fim de cada mês, por aplicação</small></h3><div class="chart"><canvas id="chInv"></canvas></div></div>
-
     <div class="card c12"><h3>Lançamentos <small>${mesLbl(m)} · toque para corrigir ou apagar</small></h3>${lanc}${maisLanc}</div>
   </div>`;
 }
@@ -2158,7 +2165,7 @@ function graficosFinancas() {
   if (!window.Chart) return;
   const meses = [...Array(12)].map((_, i) => addMes(mesSel, i - 11));
   const tot = (mm, tipo) => soma(D.fin.filter(x => x.d.startsWith(mm) && x.tipo === tipo && !ehAj(x)), x => x.valor);
-  charts.trend = new Chart($('#chTrend'), {
+  if ($('#chTrend')) charts.trend = new Chart($('#chTrend'), {
     type: 'bar',
     data: { labels: meses.map(mesLbl), datasets: [
       { label: 'Entradas', data: meses.map(mm => tot(mm, 'Entrada')), backgroundColor: C.s1, borderRadius: 4, borderSkipped: 'start', maxBarThickness: 16 },
@@ -2168,7 +2175,7 @@ function graficosFinancas() {
   });
 
   const movs = D.inv.slice().sort((a, b) => a.d < b.d ? -1 : 1);
-  if (!movs.length) return;
+  if (!movs.length || !$('#chInv')) return;
   const mesesInv = []; for (let mm = movs[0].d.slice(0, 7); mm <= D.hoje.slice(0, 7); mm = addMes(mm, 1)) mesesInv.push(mm);
   const fimMes = mm => mm === D.hoje.slice(0, 7) ? D.hoje : addDias(addMes(mm, 1) + '-01', -1);
   const aps = (D.aplicacoes || []).filter(a => a.ativa || a.estimado > 0);
@@ -2250,14 +2257,15 @@ function projetosOrdenados() {
 /* ---- seletores de visão (lembrados neste aparelho) ---- */
 const lerPref = (k, d) => { try { return localStorage.getItem(k) || d; } catch (e) { return d; } };
 const salvarPref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
-let projSel = lerPref('ld_proj', ''), conhSel = lerPref('ld_conh', 'faculdade');
+let projSel = lerPref('ld_proj', ''), conhSel = lerPref('ld_conh', 'faculdade'), finSel = lerPref('ld_fin', 'conta'), finForm = lerPref('ld_finform', 'dinheiro');
 function redesenhar(aba) {
   Object.keys(charts).forEach(k => { const c = charts[k]; if (c && c.canvas && document.getElementById('tab-' + aba).contains(c.canvas)) { c.destroy(); delete charts[k]; } });
-  ({ projetos: renderProjetos, faculdade: renderFaculdade })[aba]();
-  ({ projetos: graficosProjetos, faculdade: graficosFaculdade })[aba]();
+  ({ projetos: renderProjetos, faculdade: renderFaculdade, financas: renderFinancas })[aba]();
+  ({ projetos: graficosProjetos, faculdade: graficosFaculdade, financas: graficosFinancas })[aba]();
 }
 function verProjeto(nome) { projSel = nome; salvarPref('ld_proj', nome); redesenhar('projetos'); }
 function escolherConh(m) { conhSel = m; salvarPref('ld_conh', m); redesenhar('faculdade'); }
+function escolherFin(m) { finSel = m; salvarPref('ld_fin', m); redesenhar('financas'); }
 function renderProjetos() {
   const ps = projetosOrdenados();
   const ms = ps.map(p => ({ p, m: metricasProjeto(p) }));
@@ -3149,11 +3157,18 @@ async function abrirRegistrar() {
 async function recarregarForm() {
   try { const n = JSON.parse(await rpc('getFormData', R.diaIso)); F = n; R.dia = n.dia; renderRegistrar(); } catch (e) { toast('Erro: ' + e, true); }
 }
-function irForm(f) { formAtual = f; renderRegistrar(); window.scrollTo({ top: 0 }); }
+const FORMS_FIN = ['dinheiro', 'investir', 'negocios'];
+function irForm(f) {
+  if (f === 'financas') f = FORMS_FIN.indexOf(finForm) >= 0 ? finForm : 'dinheiro';
+  if (FORMS_FIN.indexOf(f) >= 0) { finForm = f; salvarPref('ld_finform', f); }
+  formAtual = f; renderRegistrar(); window.scrollTo({ top: 0 });
+}
 
 function renderRegistrar() {
-  const abas = [['dinheiro', 'Dinheiro'], ['dia', 'Meu dia'], ['tarefas', 'Tarefas'], ['negocios', 'Negócios'], ['projetos', 'Projetos'], ['metas', 'Metas'], ['faculdade', 'Conhecimento'], ['investir', 'Investir'], ['roda', 'Roda da Vida']];
-  const sub = '<div class="sub">' + abas.map(a => `<button class="${formAtual === a[0] ? 'on' : ''}" onclick="irForm('${a[0]}')">${a[1]}</button>`).join('') + '</div>';
+  const abas = [['financas', 'Finanças'], ['dia', 'Meu dia'], ['tarefas', 'Tarefas'], ['projetos', 'Projetos'], ['metas', 'Metas'], ['faculdade', 'Conhecimento'], ['roda', 'Roda da Vida']];
+  const naFin = FORMS_FIN.indexOf(formAtual) >= 0;
+  const sub = '<div class="sub">' + abas.map(a => `<button class="${(a[0] === 'financas' ? naFin : formAtual === a[0]) ? 'on' : ''}" onclick="irForm('${a[0]}')">${a[1]}</button>`).join('') + '</div>'
+    + (naFin ? `<div class="seg full" style="margin:0 0 14px">${[['dinheiro', 'Dinheiro'], ['investir', 'Investimento'], ['negocios', 'Negócios']].map(x => `<button type="button" class="${formAtual === x[0] ? 'on' : ''}" onclick="irForm('${x[0]}')">${x[1]}</button>`).join('')}</div>` : '');
   const corpo = ({ dinheiro: formDinheiro, dia: formDia, tarefas: formTarefas, metas: formMetas, faculdade: formConhecimento, investir: formInvestir, roda: formRoda, projetos: formProjetos, negocios: formNegocios }[formAtual] || formDinheiro)();
   $('#tab-registrar').innerHTML = sub + corpo;
 }
@@ -3856,7 +3871,7 @@ function renderNegocios() {
       <div class="kv"><span>Retirado no mês</span><b>${brl0(x.ret)}</b></div>
       <div class="kv"><span>Próximo</span><b style="font-size:13px">${pv ? esc(pv.cliente || pv.desc || 'venda') + ' · ' + ddmm(pv.entrega) + (pv.hora ? ' ' + esc(pv.hora) : '') : '—'}</b></div>
     </div>`;
-  }).join('') || '<div class="card c12"><div class="empty">Nenhum negócio cadastrado. Cadastre em Registrar › Negócios.</div></div>';
+  }).join('') || '<div class="card c12"><div class="empty">Nenhum negócio cadastrado. Cadastre em Registrar › Finanças › Negócios.</div></div>';
 
   const linhaV = v => `<div class="row lk" data-venda="${v.id}"><div><span class="t">${esc(v.cliente || v.desc || 'Venda')}</span><span class="tag">${esc(v.negocio)}</span>
       <div class="m">${[v.entrega ? ddmm(v.entrega) + (v.hora ? ' ' + esc(v.hora) : '') : '', v.desc && v.cliente ? esc(v.desc) : ''].filter(Boolean).join(' · ') || ddmm(v.d)}</div>${v.local ? `<div>${linkLocal(v.local)}</div>` : ''}</div>`;
