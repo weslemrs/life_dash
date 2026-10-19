@@ -469,8 +469,8 @@ input[type=date].in,input[type=time].in,input[type=month].in{color-scheme:dark}
     <label for="lgSenha">Senha</label>
     <input id="lgSenha" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')entrarEmail()">
     <button class="ebtn" id="lgEntrar" onclick="entrarEmail()">Entrar</button>
-    <button class="lk" onclick="criarConta()">Criar conta</button>
     <div class="msg" id="lgMsg" aria-live="polite"></div>
+    <p class="sub" style="font-size:12px;margin:22px 0 0">Acesso só para convidados. <a href="privacidade.html" style="color:#93A4C3">Privacidade</a></p>
   </div>
 </div>
 <div id="loading"><div class="t">INICIALIZANDO SISTEMA</div><div class="scan"><i></i></div></div>
@@ -1383,10 +1383,17 @@ function iniciarSB() {
 async function garantirLogin() {
   iniciarSB();
   if (window.__SB_TEST__) return true;
+  const erroUrl = new URLSearchParams(location.search + '&' + location.hash.slice(1)).get('error_description');
   const { data } = await sb.auth.getSession();
-  if (/[?&]code=/.test(location.search)) history.replaceState(null, '', location.pathname + location.search.replace(/([?&])(code|state)=[^&]*&?/g, '$1').replace(/[?&]$/, ''));
+  if (/[?&#](code|error)=/.test(location.search + location.hash)) history.replaceState(null, '', location.pathname);
   if (data && data.session) return true;
-  mostrarLogin(); return false;
+  mostrarLogin(erroUrl ? traduzErroLogin(erroUrl) : '', !!erroUrl); return false;
+}
+function traduzErroLogin(m) {
+  m = String(m || '');
+  if (/signups? not allowed|signup.*disabled|not allowed for this instance/i.test(m)) return 'Esse e-mail não tem acesso. O LIFE DASH é só para convidados.';
+  if (/access_denied|denied/i.test(m)) return 'Login cancelado.';
+  return 'Não foi possível entrar: ' + m;
 }
 function mostrarLogin(msg, ruim) {
   document.getElementById('loading').classList.add('hide');
@@ -1407,7 +1414,7 @@ async function entrarEmail() {
   const b = document.getElementById('lgEntrar'); b.disabled = true; lgMsg('Entrando…');
   const { error } = await sb.auth.signInWithPassword({ email, password: senha });
   b.disabled = false;
-  if (error) return lgMsg(/fetch|network/i.test(error.message) ? 'Sem conexão. Verifique a internet e tente de novo.' : /Invalid login/i.test(error.message) ? 'E-mail ou senha incorretos.' : /confirm/i.test(error.message) ? 'Confirme seu e-mail pelo link que enviamos e tente de novo.' : 'Erro: ' + error.message, true);
+  if (error) return lgMsg(/fetch|network/i.test(error.message) ? 'Sem conexão. Verifique a internet e tente de novo.' : /signups? not allowed/i.test(error.message) ? traduzErroLogin(error.message) : /Invalid login/i.test(error.message) ? 'E-mail ou senha incorretos.' : /confirm/i.test(error.message) ? 'Confirme seu e-mail pelo link que enviamos e tente de novo.' : 'Erro: ' + error.message, true);
   esconderLogin(); carregar();
 }
 async function criarConta() {
