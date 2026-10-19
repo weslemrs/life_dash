@@ -37,7 +37,7 @@ body{
     linear-gradient(90deg, rgba(56,189,248,.05) 1px, transparent 1px) 0 0/34px 100%,
     var(--bg);
 }
-.wrap{max-width:1120px;margin:0 auto;padding:18px 16px}
+.wrap{max-width:1120px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 18px calc(16px + env(safe-area-inset-left))}
 .hide{display:none!important}
 
 /* ---------- topo ---------- */
