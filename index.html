@@ -697,11 +697,13 @@ function fmtAplicacoes(B) {
     const aplicado = liq(movs);
     const saldos = movs.filter(m => m.movimento === 'Saldo'); const ult = saldos[saldos.length - 1];
     const saldo = ult ? n0(ult.valor) : null, dataSaldo = ult ? ult.data : '';
-    const rend = saldo === null ? null : saldo - aplicado;
+    // saldo de hoje = último saldo informado + aportes/resgates feitos depois dele
     const estimado = saldo === null ? aplicado : saldo + liq(movs.filter(m => m.data > dataSaldo || (m.data === dataSaldo && m.id > ult.id)));
+    // rendimento = quanto vale hoje − quanto você colocou de fato (aportes − resgates)
+    const rend = saldo === null ? null : estimado - aplicado;
     return { nome: a.nome, inst: a.instituicao || '', tipo: a.tipo || '', obs: a.obs || '', cdi: nN(a.rende_cdi), ativa: !!a.ativa,
       aplicado: Math.round(aplicado * 100) / 100, saldo, dataSaldo, rend: rend === null ? null : Math.round(rend * 100) / 100,
-      rendPct: rend === null || !aplicado ? null : rend / aplicado, estimado: Math.round(estimado * 100) / 100, row: rowDe(a.id) };
+      rendPct: rend === null || !(aplicado > 0) ? null : rend / aplicado, estimado: Math.round(estimado * 100) / 100, row: rowDe(a.id) };
   });
 }
 function fmtRent(B) {
