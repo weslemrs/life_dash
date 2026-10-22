@@ -3946,7 +3946,8 @@ function formNegocios() {
     const r = R.nr, n = NEGS().find(x => x.nome === r.negocio);
     return seg + `<div class="card"><h3>Retirada <small>pró-labore: do negócio para você</small></h3><div class="f">
       <div class="fl"><span class="lb">De qual negócio</span>${chipsNeg('nr', NEGS())}</div>
-      ${n ? `<div class="kv"><span>Saldo do negócio hoje</span><b class="${saldoDaConta(n.conta, D.hoje) >= 0 ? '' : 'neg'}">${brl(saldoDaConta(n.conta, D.hoje))}</b></div>` : ''}
+      ${n ? `<div class="kv"><span>Saldo do negócio hoje</span><b class="${saldoDaConta(n.conta, D.hoje) >= 0 ? '' : 'neg'}">${brl(saldoDaConta(n.conta, D.hoje))}</b></div>
+      ${saldoDaConta(n.conta, D.hoje) >= 0.01 ? `<button type="button" class="mini" style="align-self:flex-start" onclick="retirarTudo()">Retirar tudo (${brl(saldoDaConta(n.conta, D.hoje))})</button>` : ''}` : ''}
       <div class="fl"><label>Valor (R$)</label><input class="in big" inputmode="numeric" placeholder="0,00" ${campo('nr', 'valor', 'data-money="1"')}></div>
       <div class="f2"><div class="fl"><label>Data</label><input class="in" type="date" ${campo('nr', 'd')}></div>
         <div class="fl"><label>Descrição</label><input class="in" placeholder="opcional" ${campo('nr', 'desc')}></div></div>
@@ -4010,6 +4011,15 @@ async function excluirVendaUI(id, b) {
   b.disabled = true;
   try { const m = aplicarNeg(await rpc('excluirVenda', { id })); if (R.nv && R.nv.id === id) R.nv = novaVenda(); renderRegistrar(); toast('✓ ' + m, false, true); }
   catch (e) { b.disabled = false; toast('Erro: ' + e, true); }
+}
+/** Preenche o valor da retirada com todo o saldo do negócio. */
+function retirarTudo() {
+  guardarCampos();
+  const n = NEGS().find(x => x.nome === R.nr.negocio); if (!n) return;
+  const v = Math.round(saldoDaConta(n.conta, D.hoje) * 100) / 100;
+  if (!(v > 0)) return toast('Esse negócio não tem saldo para retirar', true);
+  R.nr.valor = v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  renderRegistrar();
 }
 async function salvarRetiradaUI(b) {
   guardarCampos(); const r = R.nr, valor = parseBR(r.valor);
