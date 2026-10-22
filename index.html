@@ -575,9 +575,9 @@ async function todos(t, sel, ordem) {
 }
 
 /* ---------- desfazer: cada ação guarda como voltar ---------- */
-const PK = { diario: ['data'], roda: ['semana'], perfis: ['user_id'] };
+const PK = { diario: ['data'], roda: ['semana'], perfis: ['user_id'], saude_dia: ['data'], saude_programa: ['user_id'] };
 const pkDe = t => PK[t] || ['id'];
-const conflitoDe = t => ({ diario: 'user_id,data', roda: 'user_id,semana', perfis: 'user_id' })[t] || 'id';
+const conflitoDe = t => ({ diario: 'user_id,data', roda: 'user_id,semana', perfis: 'user_id', saude_dia: 'user_id,data', saude_programa: 'user_id' })[t] || 'id';
 let UNDO = [];
 function lerUndo() { try { return JSON.parse(localStorage.getItem('ld_undo') || '[]'); } catch (e) { return []; } }
 function gravarUndo() { try { localStorage.setItem('ld_undo', JSON.stringify(UNDO)); } catch (e) {} }
@@ -665,16 +665,19 @@ async function sincronizarRecorrentes(comUndo) {
 
 /* ---------- leitura de tudo ---------- */
 async function carregarBase() {
-  const [perfil, listas, diario, metas, prog, fin, inv, apl, roda, tar, proj, spr, rec, disc, aval, neg, vend, hab, niv, bib] = await Promise.all([
+  const [perfil, listas, diario, metas, prog, fin, inv, apl, roda, tar, proj, spr, rec, disc, aval, neg, vend, hab, niv, bib, sProg, sDia, sMed, sPa, sEx] = await Promise.all([
     q(T('perfis').select('*').maybeSingle()), todos('listas', '*', [['tipo'], ['ordem'], ['id']]), todos('diario', '*', [['data']]),
     todos('metas', '*', [['ordem'], ['nome']]), todos('progresso_metas', '*', [['data'], ['id']]), todos('financas', '*', [['data'], ['id']]),
     todos('investimentos', '*', [['data'], ['id']]), todos('aplicacoes', '*', [['nome']]), todos('roda', '*', [['semana']]),
     todos('tarefas', '*', [['data', true], ['criado_em']]), todos('projetos', '*', [['inicio'], ['nome']]), todos('sprints', '*', [['inicio'], ['nome']]),
     todos('recorrentes', '*', [['inicio']]), todos('disciplinas', '*', [['nome']]), todos('avaliacoes', '*', [['data'], ['id']]),
     todos('negocios', '*', [['nome']]), todos('vendas', '*', [['data'], ['criado_em']]), todos('habilidades', '*', [['nome']]),
-    todos('niveis', '*', [['data'], ['id']]), todos('biblioteca', '*', [['inicio'], ['titulo']])
+    todos('niveis', '*', [['data'], ['id']]), todos('biblioteca', '*', [['inicio'], ['titulo']]),
+    q(T('saude_programa').select('*').maybeSingle()), todos('saude_dia', '*', [['data']]), todos('saude_medidas', '*', [['data']]),
+    todos('saude_pressao', '*', [['data'], ['hora'], ['id']]), todos('saude_exames', '*', [['ordem'], ['nome']])
   ]);
-  const B = { perfil: perfil || {}, listas, diario, metas, prog, fin, inv, apl, roda, tar, proj, spr, rec, disc, aval, neg, vend, hab, niv, bib, hoje: hojeSP() };
+  const B = { perfil: perfil || {}, listas, diario, metas, prog, fin, inv, apl, roda, tar, proj, spr, rec, disc, aval, neg, vend, hab, niv, bib, hoje: hojeSP(),
+    sau: { prog: sProg, dia: sDia, med: sMed, pa: sPa, ex: sEx } };
   B.lista = tipo => listas.filter(l => l.tipo === tipo).map(l => l.valor);
   B.metaNome = {}; metas.forEach(m => B.metaNome[m.id] = m.nome);
   B.projNome = {}; proj.forEach(p => B.projNome[p.id] = p.nome);
@@ -755,6 +758,28 @@ function fmtProjetos(B) {
   };
 }
 
+/* ---------- saúde ---------- */
+const fmtSaudeDia = r => ({ d: r.data, kcal: nN(r.kcal), proteina: nN(r.proteina), passos: nN(r.passos), kegel: r.kegel === true, oro: r.orofaringeos === true,
+  alcool0: r.zero_alcool === true, acucar0: r.zero_acucar === true, erecao: nN(r.erecao), notas: r.notas || '' });
+function fmtSaude(S) {
+  const p = S.prog;
+  return {
+    prog: p ? { altura: n0(p.altura_m), pesoIni: n0(p.peso_inicial), inicio: p.data_inicio, meta1: nN(p.meta_fase1), metaFinal: nN(p.meta_final), sem1: p.semanas_fase1,
+      r1: n0(p.ritmo_fase1), r2: n0(p.ritmo_fase2), passosIni: p.passos_ini, passosFim: p.passos_fim, kcalMax: p.kcal_max, protMin: p.proteina_min,
+      passosMin: p.passos_min, sonoMin: n0(p.sono_min), cinturaMeta: nN(p.cintura_meta), temAtalho: !!p.atalho_token } : null,
+    dias: (S.dia || []).map(fmtSaudeDia),
+    medidas: (S.med || []).map(m => ({ row: m.id, d: m.data, peso: nN(m.peso), cintura: nN(m.cintura), obs: m.obs || '' })),
+    pressao: (S.pa || []).map(x => ({ row: x.id, d: x.data, hora: hhmm(x.hora), s1: x.sis1, d1: x.dia1, s2: x.sis2, d2: x.dia2, obs: x.obs || '' })),
+    exames: (S.ex || []).map(e => ({ row: rowDe(e.id), id: e.id, nome: e.nome, unidade: e.unidade || '', alvo: e.alvo || '', ordem: e.ordem, inicio: e.inicio || '', sem12: e.sem12 || '', m6: e.m6 || '', a1: e.a1 || '' }))
+  };
+}
+async function lerSaude() {
+  const [prog, dia, med, pa, ex] = await Promise.all([q(T('saude_programa').select('*').maybeSingle()), todos('saude_dia', '*', [['data']]), todos('saude_medidas', '*', [['data']]),
+    todos('saude_pressao', '*', [['data'], ['hora'], ['id']]), todos('saude_exames', '*', [['ordem'], ['nome']])]);
+  return fmtSaude({ prog, dia, med, pa, ex });
+}
+async function respSaude(msg, extra) { return Object.assign({ msg, saude: await lerSaude() }, extra || {}); }
+
 function montarDash(B) {
   const hoje = B.hoje, areas = B.lista('area');
   const fac = fmtFaculdade(B);
@@ -774,17 +799,19 @@ function montarDash(B) {
     faculdade: fac.avaliacoes.filter(a => a.status !== 'Feito' && a.d && a.d >= hoje).map(a => ({ disciplina: a.disciplina, tipo: a.tipo, desc: a.desc, d: a.d })),
     avaliacoes: fac.avaliacoes, disciplinas: fac.disciplinas,
     progresso: B.prog.map(p => fmtProg(B, p)), feitas: B.tar.filter(t => t.status === 'Feito').map(t => t.data || ''),
-    negocios: fmtNegocios(B), vendas: fmtVendas(B), conh: fmtConh(B), proj: fmtProjetos(B)
+    negocios: fmtNegocios(B), vendas: fmtVendas(B), conh: fmtConh(B), proj: fmtProjetos(B), saude: fmtSaude(B.sau)
   };
 }
 function lerDia(B, iso) {
   iso = isoOk(iso) ? iso : B.hoje;
   const manuais = {}; B.prog.filter(p => p.data === iso).forEach(p => { const n = B.metaNome[p.meta_id]; if (n) manuais[n] = (manuais[n] || 0) + n0(p.valor); });
   const r = B.diario.find(x => x.data === iso);
-  if (!r) return { d: iso, existe: false, manuais };
+  const sd = (B.sauDia || (B.sau && B.sau.dia) || []).find(x => x.data === iso);
+  const saude = sd ? fmtSaudeDia(sd) : null;
+  if (!r) return { d: iso, existe: false, manuais, saude };
   return { d: iso, existe: true, manuais, treinou: !!r.treinou, tipo: r.tipo_treino || '', km: vazio(r.km), agua: vazio(r.agua_ml), sono: vazio(r.sono_h), energia: vazio(r.energia),
     leitura: vazio(r.leitura_pag), metaLeitura: vazio(r.meta_leitura), devocional: !!r.devocional, estudo: vazio(r.estudo_h), negocios: vazio(r.negocios_h), obs: r.obs || '',
-    cardio: r.cardio_modalidade || '', minCardio: vazio(r.cardio_min), minCorpo: vazio(r.corpo_min) };
+    cardio: r.cardio_modalidade || '', minCardio: vazio(r.cardio_min), minCorpo: vazio(r.corpo_min), saude };
 }
 function montarForm(B, iso) {
   const regras = regrasInfo(B, true), fac = fmtFaculdade(B);
@@ -798,7 +825,8 @@ function montarForm(B, iso) {
     dia: lerDia(B, iso), tiposAval: B.lista('tipo_avaliacao'),
     recorrentes: B.rec.filter(r => r.ativa).map(x => { const r = regraDe(x); return { id: r.id, tarefa: r.tarefa, desc: descreverRegra(r), hora: r.hora }; }),
     avaliacoes: fac.avaliacoes, disciplinas: fac.disciplinas, metasTodas: B.metas.map(fmtMeta),
-    aplicacoes: fmtAplicacoes(B), inv: B.inv.map(m => fmtMov(B, m)).sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : 0).slice(-30)
+    aplicacoes: fmtAplicacoes(B), inv: B.inv.map(m => fmtMov(B, m)).sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : 0).slice(-30),
+    saude: fmtSaude(B.sau)
   };
 }
 
@@ -837,8 +865,9 @@ const SBAPI = {
   },
   async getDia(iso) {
     iso = isoOk(iso) ? iso : hojeSP();
-    const [dia, prog, metas] = await Promise.all([q(T('diario').select('*').eq('data', iso)), q(T('progresso_metas').select('*').eq('data', iso)), q(T('metas').select('id,nome'))]);
-    const B = { hoje: hojeSP(), diario: dia, prog, metaNome: {} }; metas.forEach(m => B.metaNome[m.id] = m.nome);
+    const [dia, prog, metas, sauDia] = await Promise.all([q(T('diario').select('*').eq('data', iso)), q(T('progresso_metas').select('*').eq('data', iso)), q(T('metas').select('id,nome')),
+      q(T('saude_dia').select('*').eq('data', iso))]);
+    const B = { hoje: hojeSP(), diario: dia, prog, metaNome: {}, sauDia }; metas.forEach(m => B.metaNome[m.id] = m.nome);
     return JSON.stringify(lerDia(B, iso));
   },
 
@@ -851,6 +880,7 @@ const SBAPI = {
       negocios_h: vazioNum(o.negocios), obs: o.obs || null, cardio_modalidade: treinou ? o.cardio || null : null, cardio_min: treinou ? vazioNum(o.minCardio) : null,
       corpo_min: treinou ? vazioNum(o.minCorpo) : null, atualizado_em: new Date().toISOString() });
     if (Array.isArray(o.manuais) && o.manuais.length) await definirProgressoDia(o.d, o.manuais);
+    if (o.saude) await gravarSaudeDia(o.d, o.saude);
     return 'Dia ' + o.d.slice(8, 10) + '/' + o.d.slice(5, 7) + ' salvo';
   }),
   salvarTreino: o => acao(async () => {
@@ -1256,6 +1286,86 @@ const SBAPI = {
     return respNeg('Retirada de ' + reais(valor) + ' de ' + n.nome);
   }),
 
+  /* ----- Saúde ----- */
+  salvarSaudeDia: o => acao(async () => {
+    if (!isoOk(o.d)) throw new Error('data inválida');
+    await gravarSaudeDia(o.d, o);
+    return respSaude('Saúde de ' + o.d.slice(8, 10) + '/' + o.d.slice(5, 7) + ' salva');
+  }),
+  salvarProgramaSaude: o => acao(async () => {
+    const pesoIni = Number(o.pesoIni), altura = Number(o.altura);
+    if (!(pesoIni > 20)) throw new Error('informe o peso inicial');
+    if (!(altura >= 1 && altura <= 2.5)) throw new Error('altura em metros, ex.: 1,86');
+    if (!isoOk(o.inicio)) throw new Error('data de início inválida');
+    const pct = v => { const n = vazioNum(v); return n === null ? null : n / 100; };
+    const dados = { altura_m: altura, peso_inicial: pesoIni, data_inicio: o.inicio, meta_fase1: vazioNum(o.meta1), meta_final: vazioNum(o.metaFinal),
+      semanas_fase1: Math.max(1, Math.round(Number(o.sem1) || 12)), ritmo_fase1: pct(o.r1) ?? 0.01, ritmo_fase2: pct(o.r2) ?? 0.0045,
+      passos_ini: Math.round(Number(o.passosIni) || 7000), passos_fim: Math.round(Number(o.passosFim) || 12000), kcal_max: Math.round(Number(o.kcalMax) || 2300),
+      proteina_min: Math.round(Number(o.protMin) || 160), passos_min: Math.round(Number(o.passosMin) || 7000), sono_min: Number(o.sonoMin) || 7,
+      cintura_meta: vazioNum(o.cinturaMeta), atualizado_em: new Date().toISOString() };
+    const ex = await q(T('saude_programa').select('user_id').maybeSingle());
+    if (ex) await upd('saude_programa', { user_id: ex.user_id }, dados);
+    else { await ins('saude_programa', dados); try { await q(sb.rpc('saude_exames_padrao')); } catch (e) { console.warn(e); } }
+    return respSaude(ex ? 'Programa atualizado' : 'Programa criado · metas das próximas semanas calculadas');
+  }),
+  salvarPesagem: o => acao(async () => {
+    if (!isoOk(o.d)) throw new Error('data inválida');
+    const peso = vazioNum(o.peso), cintura = vazioNum(o.cintura);
+    if (peso === null && cintura === null) throw new Error('informe o peso ou a cintura');
+    const dados = { data: o.d, peso, cintura, obs: o.obs || null };
+    if (o.row) { if (!(await upd('saude_medidas', { id: Number(o.row) }, dados)).length) throw new Error('essa pesagem não existe mais'); }
+    else await upsertUm('saude_medidas', { data: o.d }, dados);
+    return respSaude((peso !== null ? 'Peso ' + String(peso).replace('.', ',') + ' kg' : 'Cintura ' + String(cintura).replace('.', ',') + ' cm') + ' em ' + o.d.slice(8, 10) + '/' + o.d.slice(5, 7));
+  }),
+  excluirPesagem: o => acao(async () => {
+    if (!(await del('saude_medidas', { id: Number(o.row) })).length) throw new Error('pesagem não encontrada');
+    return respSaude('Pesagem apagada');
+  }),
+  salvarPressao: o => acao(async () => {
+    if (!isoOk(o.d)) throw new Error('data inválida');
+    const s1 = Number(o.s1), d1 = Number(o.d1), s2 = vazioNum(o.s2), d2 = vazioNum(o.d2);
+    if (!(s1 >= 50 && s1 <= 300 && d1 >= 30 && d1 <= 200)) throw new Error('confira a 1ª leitura (ex.: 132 por 86)');
+    if ((s2 === null) !== (d2 === null)) throw new Error('a 2ª leitura precisa dos dois números');
+    const dados = { data: o.d, hora: o.hora || null, sis1: s1, dia1: d1, sis2: s2, dia2: d2, obs: o.obs || null };
+    if (o.row) { if (!(await upd('saude_pressao', { id: Number(o.row) }, dados)).length) throw new Error('essa medição não existe mais'); }
+    else await ins('saude_pressao', dados);
+    const ms = s2 === null ? s1 : Math.round((s1 + s2) / 2), md = d2 === null ? d1 : Math.round((d1 + d2) / 2);
+    return respSaude('Pressão ' + ms + '/' + md + ' registrada', { media: [ms, md] });
+  }),
+  excluirPressao: o => acao(async () => {
+    if (!(await del('saude_pressao', { id: Number(o.row) })).length) throw new Error('medição não encontrada');
+    return respSaude('Medição apagada');
+  }),
+  salvarExame: o => acao(async () => {
+    const nome = String(o.nome || '').trim(); if (!nome) throw new Error('dê um nome ao exame');
+    const id = o.row ? idDe(o.row) : null;
+    const lista = await q(T('saude_exames').select('id,nome,ordem'));
+    if (lista.some(e => e.id !== id && nrm(e.nome) === nrm(nome))) throw new Error('esse exame já está na lista');
+    const t = v => { const x = String(v == null ? '' : v).trim(); return x || null; };
+    const dados = { nome, unidade: t(o.unidade), alvo: t(o.alvo), inicio: t(o.inicio), sem12: t(o.sem12), m6: t(o.m6), a1: t(o.a1) };
+    if (id) { if (!(await upd('saude_exames', { id }, dados)).length) throw new Error('exame não encontrado'); }
+    else await ins('saude_exames', Object.assign(dados, { ordem: lista.reduce((m, e) => Math.max(m, e.ordem || 0), 0) + 1 }));
+    return respSaude(id ? 'Exame atualizado' : 'Exame "' + nome + '" adicionado');
+  }),
+  excluirExame: o => acao(async () => {
+    const x = (await del('saude_exames', { id: idDe(o.row) }))[0]; if (!x) throw new Error('exame não encontrado');
+    return respSaude('"' + x.nome + '" removido');
+  }),
+  /** Link secreto do Atalhos (passos automáticos). Gerar de novo invalida o anterior. */
+  async gerarAtalhoPassos() {
+    UNDO = []; gravarUndo();
+    const ex = await q(T('saude_programa').select('user_id').maybeSingle());
+    if (!ex) throw new Error('crie o programa de saúde primeiro');
+    const b = new Uint8Array(24); crypto.getRandomValues(b);
+    const token = 'ld_' + Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+    await q(T('saude_programa').update({ atalho_token: token }).eq('user_id', ex.user_id));
+    return { msg: 'Link do Atalhos criado', token, url: SB_URL + '/rest/v1/rpc/registrar_passos', chave: SB_KEY };
+  },
+  async lerAtalhoPassos() {
+    const ex = await q(T('saude_programa').select('atalho_token').maybeSingle());
+    return ex && ex.atalho_token ? { token: ex.atalho_token, url: SB_URL + '/rest/v1/rpc/registrar_passos', chave: SB_KEY } : null;
+  },
+
   /* ----- Projetos ----- */
   salvarProjeto: o => acao(async () => {
     const nome = String(o.nome || '').trim(); if (!nome) throw new Error('dê um nome ao projeto');
@@ -1349,6 +1459,22 @@ async function aplicarRepeticao(t, o, titulo, campos, nova) {
     await upd('recorrentes', { id: t.recorrente_id }, { ativa: false }); msgRep = ' · parou de repetir'; regraId = null;
   }
   return { regraId, msgRep, dataOcc };
+}
+
+/** Registro de saúde de um dia (calorias, proteína, passos, hábitos, ereção, notas). Só grava os campos enviados. */
+async function gravarSaudeDia(iso, o) {
+  const m = { kcal: 'kcal', proteina: 'proteina', passos: 'passos', kegel: 'kegel', oro: 'orofaringeos', alcool0: 'zero_alcool', acucar0: 'zero_acucar', erecao: 'erecao', notas: 'notas' };
+  const patch = {};
+  Object.keys(m).forEach(k => {
+    if (!(k in o)) return;
+    const v = o[k];
+    if (['kegel', 'oro', 'alcool0', 'acucar0'].indexOf(k) >= 0) patch[m[k]] = v === null || v === '' ? null : !!v;
+    else if (k === 'notas') patch[m[k]] = v ? String(v) : null;
+    else { const n = vazioNum(v); patch[m[k]] = n === null ? null : Math.round(n); }
+  });
+  if (!Object.keys(patch).length) return;
+  patch.atualizado_em = new Date().toISOString();
+  await upsertUm('saude_dia', { data: iso }, patch);
 }
 
 /** Metas manuais no Meu dia: o valor vira o total do dia (substitui o que havia). */
@@ -1509,7 +1635,7 @@ const ABAS = [
   ['faculdade', 'Conhecimento', 'Faculdade, habilidades, leitura', '<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5M22 9v6"/>'],
   ['financas', 'Finanças', 'Gastos e investimentos', '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>'],
   ['metas', 'Metas', 'Progresso e Roda da Vida', '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/>'],
-  ['fitness', 'Fitness', 'Treinos, água, sono', '<path d="M3 12h3l3-7 4 14 3-7h5"/>'],
+  ['fitness', 'Saúde', 'Programa, peso, pressão, treinos', '<path d="M3 12h3l3-7 4 14 3-7h5"/>'],
   ['records', 'Track records', 'Os totais do ano', '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>']
 ];
 const ICONE_REG = '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>';
@@ -1813,7 +1939,7 @@ async function salvarTreinoUI(b) {
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && (TR || MT)) fecharSheet(); if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('ed')) { e.preventDefault(); e.target.click(); } });
 
-function renderFitness() {
+function renderTreinoHtml() {
   const h = D.hoje, sem = ultimos(7), mes = h.slice(0, 7);
   const treinos = sem.filter(d => porDia[d] && porDia[d].treinou).length;
   const kmMes = soma(D.diario.filter(r => r.d.startsWith(mes)), r => r.km);
@@ -1842,7 +1968,7 @@ function renderFitness() {
     heat += `<div class="cell ${on ? 'on' : ''} ${d === h ? 'today' : ''} ${fut ? 'fut' : 'ed'}" ${st} title="${ddmm(d)} · ${esc(tit)}${fut ? '' : ' · toque para editar'}"${fut ? '' : ` role="button" tabindex="0" onclick="editarTreino('${d}')"`}>${on ? `<span class="ic ${ms.length > 1 ? 'two' : ''}">${ms.length ? ms.map(icTreino).join('') : icTreino('')}</span>${k ? `<span class="km">${num(k, k < 10 ? 1 : 0)}</span>` : ''}` : `<span class="dn">${+d.slice(8, 10)}</span>`}</div>`;
   }
 
-  $('#tab-fitness').innerHTML = `
+  return `
   <div class="grid">
     <div class="card c12"><h3>Status do corpo <small>últimos 7 dias</small></h3>
       <div class="rings">
@@ -1869,6 +1995,7 @@ function renderFitness() {
 
 function graficosFitness() {
   if (!window.Chart) return;
+  if (saudeSel !== 'treino') return graficosSaude();
   const dias = ultimos(14);
   charts.agua = new Chart($('#chAgua'), {
     type: 'bar',
@@ -2267,12 +2394,372 @@ const salvarPref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} 
 let projSel = lerPref('ld_proj', ''), conhSel = lerPref('ld_conh', 'faculdade'), finSel = lerPref('ld_fin', 'conta'), finForm = lerPref('ld_finform', 'dinheiro');
 function redesenhar(aba) {
   Object.keys(charts).forEach(k => { const c = charts[k]; if (c && c.canvas && document.getElementById('tab-' + aba).contains(c.canvas)) { c.destroy(); delete charts[k]; } });
-  ({ projetos: renderProjetos, faculdade: renderFaculdade, financas: renderFinancas })[aba]();
-  ({ projetos: graficosProjetos, faculdade: graficosFaculdade, financas: graficosFinancas })[aba]();
+  ({ projetos: renderProjetos, faculdade: renderFaculdade, financas: renderFinancas, fitness: renderFitness })[aba]();
+  ({ projetos: graficosProjetos, faculdade: graficosFaculdade, financas: graficosFinancas, fitness: graficosFitness })[aba]();
 }
 function verProjeto(nome) { projSel = nome; salvarPref('ld_proj', nome); redesenhar('projetos'); }
 function escolherConh(m) { conhSel = m; salvarPref('ld_conh', m); redesenhar('faculdade'); }
 function escolherFin(m) { finSel = m; salvarPref('ld_fin', m); redesenhar('financas'); }
+
+/* =================== SAÚDE =================== */
+/* Programa de saúde: metas semanais calculadas a partir do programa, registro diário com pontos (de 8),
+   pesagens, pressão (classificação da diretriz brasileira 2020) e exames por marco. */
+const SAU = () => (D && D.saude) || (F && F.saude) || { prog: null, dias: [], medidas: [], pressao: [], exames: [] };
+const diasEntreIso = (a, b) => Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10))) / 864e5);
+const semanaProg = (p, iso) => Math.floor(diasEntreIso(p.inicio, iso) / 7);
+const inicioSemana = (p, k) => addDias(p.inicio, 7 * k);
+function pesoMetaSemana(p, k) {
+  k = Math.max(0, k);
+  let w = p.pesoIni * Math.pow(1 - p.r1, Math.min(k, p.sem1));
+  if (k > p.sem1) w *= Math.pow(1 - p.r2, k - p.sem1);
+  return Math.round(w * 10) / 10;
+}
+function passosMetaSemana(p, k) {
+  if (k < 1) return p.passosIni;
+  if (k >= p.sem1) return p.passosFim;
+  return Math.round((p.passosIni + (p.passosFim - p.passosIni) * (k - 1) / Math.max(1, p.sem1 - 1)) / 5) * 5;
+}
+const treinosMetaSemana = (p, k) => k <= Math.round(p.sem1 * 2 / 3) ? 3 : 4;
+function faseSemana(p, k) {
+  if (k <= 0) return 'Início';
+  if (k <= p.sem1 / 3) return '1. Arrancada';
+  if (k <= p.sem1 * 2 / 3) return '2. Aceleração';
+  if (k <= p.sem1) return '3. Consolidação';
+  return '4. Rumo à meta final';
+}
+const saudeDoDia = iso => SAU().dias.find(x => x.d === iso) || null;
+/** Os 8 itens do dia (mesma regra do plano). null quando não há nada registrado. */
+function itensDia(iso) {
+  const p = SAU().prog, s = saudeDoDia(iso), sono = porDia[iso] ? porDia[iso].sono : null;
+  if (!p || iso < p.inicio || (!s && sono == null)) return null;
+  const x = s || {};
+  return [
+    ['Calorias', x.kcal != null && x.kcal <= p.kcalMax, x.kcal != null ? num(x.kcal) + ' kcal' : '—', 'até ' + num(p.kcalMax)],
+    ['Proteína', x.proteina != null && x.proteina >= p.protMin, x.proteina != null ? num(x.proteina) + ' g' : '—', num(p.protMin) + ' g+'],
+    ['Passos', x.passos != null && x.passos >= p.passosMin, x.passos != null ? num(x.passos) : '—', num(p.passosMin) + '+'],
+    ['Kegel', !!x.kegel, x.kegel ? 'feito' : '—', ''],
+    ['Orofaríngeos', !!x.oro, x.oro ? 'feito' : '—', ''],
+    ['Sono', sono != null && sono >= p.sonoMin, sono != null ? num(sono, 1) + ' h' : '—', num(p.sonoMin, 1) + ' h+'],
+    ['Zero álcool', !!x.alcool0, x.alcool0 ? 'sim' : '—', ''],
+    ['Zero açúcar', !!x.acucar0, x.acucar0 ? 'sim' : '—', '']
+  ];
+}
+const pontosDia = iso => { const it = itensDia(iso); return it ? it.filter(i => i[1]).length : null; };
+const mediaPA = x => x.s2 != null && x.d2 != null ? [Math.round((x.s1 + x.s2) / 2), Math.round((x.d1 + x.d2) / 2)] : [x.s1, x.d1];
+/** Classificação da pressão (Diretriz Brasileira de Hipertensão 2020): vale a pior das duas. */
+function classePA(s, d) {
+  const n = s >= 180 || d >= 110 ? 5 : s >= 160 || d >= 100 ? 4 : s >= 140 || d >= 90 ? 3 : s >= 130 || d >= 85 ? 2 : s >= 120 || d >= 80 ? 1 : 0;
+  return [['Ótima', 'pos'], ['Normal', 'pos'], ['Pré-hipertensão', 'wrn'], ['Hipertensão estágio 1', 'neg'], ['Hipertensão estágio 2', 'neg'], ['Hipertensão estágio 3', 'neg']][n].concat(n);
+}
+const pesoAtual = () => { const m = SAU().medidas.filter(x => x.peso != null); return m.length ? m[m.length - 1] : null; };
+const cinturaAtual = () => { const m = SAU().medidas.filter(x => x.cintura != null); return m.length ? m[m.length - 1] : null; };
+const imcDe = (peso, alt) => alt ? peso / (alt * alt) : null;
+function pesoDaSemana(p, k) {
+  const ini = inicioSemana(p, k), fim = addDias(ini, 6);
+  const m = SAU().medidas.filter(x => x.peso != null && x.d >= ini && x.d <= fim);
+  return m.length ? m[m.length - 1].peso : (k === 0 ? p.pesoIni : null);
+}
+function treinosDaSemana(p, k) {
+  const ini = inicioSemana(p, k), fim = addDias(ini, 6);
+  return D.diario.filter(r => r.treinou && r.d >= ini && r.d <= fim).length;
+}
+function marcosPrograma(p) {
+  const alt = p.altura, m = [
+    ['−5% do peso', p.pesoIni * 0.95, 'pressão e glicemia já melhoram'],
+    ['Sair da obesidade grau II', 35 * alt * alt, 'IMC abaixo de 35'],
+    ['−10% do peso', p.pesoIni * 0.90, 'apneia e ereção melhoram de forma clara'],
+    p.meta1 ? ['Meta de ' + p.sem1 + ' semanas', p.meta1, ''] : null,
+    ['Sair da obesidade', 29.9 * alt * alt, 'IMC abaixo de 30'],
+    p.metaFinal ? ['Meta final', p.metaFinal, ''] : null
+  ].filter(x => x && x[1] < p.pesoIni);
+  const atual = pesoAtual(), menor = Math.min(p.pesoIni, ...SAU().medidas.filter(x => x.peso != null).map(x => x.peso));
+  return m.sort((a, b) => b[1] - a[1]).map(([nome, peso, obs]) => {
+    let semana = null; for (let k = 0; k <= 104; k++) if (pesoMetaSemana(p, k) <= peso + 0.3) { semana = k; break; }
+    return { nome, peso: Math.round(peso * 10) / 10, obs, ok: menor <= peso, semana, data: semana != null ? inicioSemana(p, semana) : '', atual: atual ? atual.peso : p.pesoIni };
+  });
+}
+
+let saudeSel = lerPref('ld_saude', 'painel');
+function escolherSaude(m) { saudeSel = m; salvarPref('ld_saude', m); redesenhar('fitness'); }
+function renderFitness() {
+  const p = SAU().prog;
+  if (!p && saudeSel !== 'treino') saudeSel = 'painel';
+  const seletor = `<div class="grid" style="margin-bottom:14px"><div class="card c12" style="padding:10px 12px"><div class="seg full" style="margin:0">${[['painel', 'Programa'], ['pressao', 'Pressão'], ['exames', 'Exames'], ['treino', 'Treinos']].map(x => `<button type="button" class="${saudeSel === x[0] ? 'on' : ''}" onclick="escolherSaude('${x[0]}')">${x[1]}</button>`).join('')}</div></div></div>`;
+  const corpo = saudeSel === 'treino' ? renderTreinoHtml() : saudeSel === 'pressao' ? htmlPressao() : saudeSel === 'exames' ? htmlExames() : htmlSaudePainel();
+  $('#tab-fitness').innerHTML = seletor + corpo;
+}
+function irSaude(modo, extra) { R.sau = Object.assign({ modo }, extra || {}); irPara('registrar', 'saude'); }
+function abrirDiaSaude(iso) { irPara('registrar', 'dia'); carregarDia(iso); }
+
+function htmlSaudePainel() {
+  const S = SAU(), p = S.prog, h = D.hoje;
+  if (!p) return `<div class="grid"><div class="card c12"><h3>Programa de saúde</h3>
+    <p style="color:var(--ink2);margin:0 0 14px">Configure uma vez o seu programa (altura, peso inicial, metas e regras). O app calcula sozinho as metas de cada semana, os pontos do dia e os marcos.</p>
+    <button class="go" onclick="irSaude('programa')">Configurar programa</button></div></div>`;
+  const k = Math.max(0, semanaProg(p, h)), metaSem = pesoMetaSemana(p, k), at = pesoAtual(), peso = at ? at.peso : p.pesoIni;
+  const perdido = p.pesoIni - peso, imc = imcDe(peso, p.altura), imc0 = imcDe(p.pesoIni, p.altura);
+  const pesoSem = pesoDaSemana(p, k), pesouSegunda = pesoSem != null && k > 0;
+  const sit = !pesouSegunda && k > 0 ? ['Pese-se esta semana', 'wrn'] : peso <= metaSem + 0.05 ? ['No ritmo', 'pos'] : ['Atrás ' + num(peso - metaSem, 1) + ' kg', 'neg'];
+  const sem7 = ultimos(7), pts = sem7.map(pontosDia).filter(v => v != null), passos = sem7.map(d => (saudeDoDia(d) || {}).passos).filter(v => v != null);
+  const pa = S.pressao.length ? S.pressao[S.pressao.length - 1] : null, paM = pa ? mediaPA(pa) : null, paC = paM ? classePA(paM[0], paM[1]) : null;
+  const cint = cinturaAtual();
+  const hoje = itensDia(h), ptsHoje = hoje ? hoje.filter(i => i[1]).length : 0;
+  // calendário de pontos (5 semanas)
+  const ini = addDias(segunda(h), -28);
+  let heat = DIAS.slice(1).concat(DIAS[0]).map(x => `<div class="hd">${x}</div>`).join('');
+  for (let i = 0; i < 35; i++) {
+    const d = addDias(ini, i), fut = d > h, pt = fut ? null : pontosDia(d);
+    const a = pt == null ? 0 : 0.12 + 0.78 * pt / 8, cor = pt == null ? '' : pt >= 6 ? '74,222,128' : pt >= 4 ? '251,191,36' : '248,113,113';
+    const st = pt == null ? '' : `style="background:rgba(${cor},${a.toFixed(2)})"`;
+    heat += `<div class="cell ${pt != null ? 'on' : ''} ${d === h ? 'today' : ''} ${fut ? 'fut' : 'ed'}" ${st} title="${ddmm(d)} · ${pt == null ? 'sem registro' : pt + ' de 8 pontos'}"${fut ? '' : ` role="button" tabindex="0" onclick="abrirDiaSaude('${d}')"`}><span class="dn">${pt == null ? +d.slice(8, 10) : pt}</span></div>`;
+  }
+  const semanas = []; for (let j = Math.max(0, k - 1); j <= k + 4; j++) semanas.push(j);
+  const linhasSem = semanas.map(j => { const real = pesoDaSemana(p, j), tf = j <= k ? treinosDaSemana(p, j) : null;
+    return `<tr${j === k ? ' style="background:rgba(34,211,238,.07)"' : ''}><td>${j}</td><td>${ddmm(inicioSemana(p, j))}</td><td class="o">${num(pesoMetaSemana(p, j), 1)}</td><td class="o ${real == null ? '' : real <= pesoMetaSemana(p, j) + 0.05 ? 'pos' : 'neg'}">${real == null ? '—' : num(real, 1)}</td><td class="o">${num(passosMetaSemana(p, j))}</td><td class="o">${tf == null ? '' : tf + '/'}${treinosMetaSemana(p, j)}</td></tr>`; }).join('');
+  const marcos = marcosPrograma(p).map(m => `<div class="row"><div><span class="t">${m.ok ? '✅' : '⬜'} ${esc(m.nome)}</span><div class="m">${num(m.peso, 1)} kg${m.obs ? ' · ' + esc(m.obs) : ''}</div></div><div class="v ${m.ok ? 'pos' : ''}">${m.ok ? 'atingido' : m.semana != null ? 'sem. ' + m.semana + ' · ' + ddmm(m.data) : '—'}</div></div>`).join('');
+  return `<div class="grid">
+    <div class="card kpi c3"><div class="lbl">Peso atual</div><div class="val">${num(peso, 1)} kg</div><div class="sub">${at ? 'pesado em ' + ddmm(at.d) : 'peso inicial'} · IMC ${num(imc, 1)}</div></div>
+    <div class="card kpi c3"><div class="lbl">Perdido</div><div class="val ${perdido > 0 ? 'pos' : ''}">${perdido > 0 ? '− ' : ''}${num(Math.abs(perdido), 1)} kg</div><div class="sub">${pct(perdido / p.pesoIni, 1)} · faltam ${p.meta1 ? num(Math.max(0, peso - p.meta1), 1) + ' kg p/ ' + num(p.meta1) : '—'}${p.metaFinal ? ' · ' + num(Math.max(0, peso - p.metaFinal), 1) + ' p/ ' + num(p.metaFinal) : ''}</div></div>
+    <div class="card kpi c3"><div class="lbl">Semana ${k}</div><div class="val">${num(metaSem, 1)} kg</div><div class="sub">${esc(faseSemana(p, k))} · meta máx. desta semana · ${num(passosMetaSemana(p, k))} passos/dia</div></div>
+    <div class="card kpi c3"><div class="lbl">Situação</div><div class="val ${sit[1]}" style="font-size:20px">${sit[0]}</div><div class="sub">pesagem toda segunda ao acordar</div></div>
+    <div class="card kpi c3"><div class="lbl">Pontos (7 dias)</div><div class="val">${pts.length ? num(media(pts), 1) : '—'}<span style="font-size:13px;color:var(--ink3)"> /8</span></div><div class="sub">hoje ${hoje ? ptsHoje + '/8' : 'sem registro'}</div></div>
+    <div class="card kpi c3"><div class="lbl">Passos (7 dias)</div><div class="val">${passos.length ? num(media(passos)) : '—'}</div><div class="sub">média · meta ${num(passosMetaSemana(p, k))}/dia</div></div>
+    <div class="card kpi c3"><div class="lbl">Pressão</div><div class="val ${paC ? paC[1] : ''}" style="font-size:22px">${paM ? paM[0] + '/' + paM[1] : '—'}</div><div class="sub">${pa ? esc(paC[0]) + ' · ' + ddmm(pa.d) : 'medir 2x por semana'}</div></div>
+    <div class="card kpi c3"><div class="lbl">Cintura</div><div class="val">${cint ? num(cint.cintura, 1) + ' cm' : '—'}</div><div class="sub">${p.cinturaMeta ? 'meta abaixo de ' + num(p.cinturaMeta) + ' cm' : ''}${cint ? ' · ' + ddmm(cint.d) : ' · medir a cada 2 semanas'}</div></div>
+    ${paC && paC[2] >= 5 ? `<div class="card c12" style="border-color:var(--bad)"><h3 style="color:var(--bad)">⚠️ Última pressão muito alta (${paM[0]}/${paM[1]})</h3><p style="margin:0">Pelo seu plano: acima de 180/110, ou com dor no peito, falta de ar ou dor de cabeça forte, procure o pronto-socorro. Meça de novo em 5 minutos, sentado.</p></div>` : ''}
+
+    <div class="card c8"><h3>Peso × meta <small>semana a semana</small></h3><div class="chart"><canvas id="chPeso"></canvas></div></div>
+    <div class="card c4"><h3>Hoje <small>${ptsHoje}/8 pontos</small></h3>
+      ${(hoje || [['Calorias'], ['Proteína'], ['Passos'], ['Kegel'], ['Orofaríngeos'], ['Sono'], ['Zero álcool'], ['Zero açúcar']].map(x => [x[0], false, '—', ''])).map(i => `<div class="kv"><span>${i[1] ? '✅' : '⬜'} ${esc(i[0])}</span><b class="${i[1] ? 'pos' : ''}">${esc(i[2])}</b></div>`).join('')}
+      <button class="mini" style="margin-top:12px" onclick="abrirDiaSaude('${h}')">Registrar no Meu dia</button></div>
+
+    <div class="card c6"><h3>Pontos do dia <small>toque num dia para editar · de 8</small></h3><div class="heat">${heat}</div>
+      <div class="legend"><span><i style="background:rgba(74,222,128,.8)"></i>6 a 8</span><span><i style="background:rgba(251,191,36,.6)"></i>4 a 5</span><span><i style="background:rgba(248,113,113,.5)"></i>0 a 3</span></div></div>
+    <div class="card c6"><h3>Semanas <small>meta de peso é o máximo aceitável</small></h3>
+      <table><thead><tr><th>Sem</th><th>Início</th><th>Meta</th><th>Real</th><th>Passos</th><th>Treinos</th></tr></thead><tbody>${linhasSem}</tbody></table>
+      <button class="mini ghost" style="margin-top:10px" onclick="irSaude('pesagem')">Registrar pesagem</button></div>
+    <div class="card c6"><h3>Marcos</h3>${marcos || '<div class="empty">Defina as metas no programa.</div>'}</div>
+    <div class="card c6"><h3>Regras do programa</h3>
+      <div class="kv"><span>Calorias</span><b>até ${num(p.kcalMax)} kcal</b></div>
+      <div class="kv"><span>Proteína</span><b>${num(p.protMin)} g ou mais</b></div>
+      <div class="kv"><span>Passos</span><b>${num(p.passosMin)}+ (meta da semana ${num(passosMetaSemana(p, k))})</b></div>
+      <div class="kv"><span>Sono</span><b>${num(p.sonoMin, 1)} h ou mais</b></div>
+      <div class="kv"><span>Todo dia</span><b>Kegel · orofaríngeos · zero álcool · zero açúcar</b></div>
+      <div class="kv"><span>Treino</span><b>musculação ${treinosMetaSemana(p, k)}x na semana</b></div>
+      <button class="mini ghost" style="margin-top:10px" onclick="irSaude('programa')">Ajustar programa</button></div>
+  </div>`;
+}
+
+function htmlPressao() {
+  const L = SAU().pressao, h = D.hoje;
+  const ult = L.length ? L[L.length - 1] : null, m = ult ? mediaPA(ult) : null, c = m ? classePA(m[0], m[1]) : null;
+  const ult30 = L.filter(x => x.d >= addDias(h, -30)).map(mediaPA), sem = L.filter(x => x.d >= addDias(h, -6)).length;
+  const lista = L.slice().reverse().slice(0, 20).map(x => { const mm = mediaPA(x), cc = classePA(mm[0], mm[1]);
+    return `<div class="row"><div><span class="t">${mm[0]}/${mm[1]} <span class="${cc[1]}" style="font-size:12px;font-weight:600">${esc(cc[0])}</span></span><div class="m">${ddmm(x.d)}${x.hora ? ' ' + x.hora : ''} · ${x.s1}/${x.d1}${x.s2 != null ? ' e ' + x.s2 + '/' + x.d2 : ''}${x.obs ? ' · ' + esc(x.obs) : ''}</div></div>
+      <div class="v" style="display:flex;gap:6px"><button class="mini ghost" onclick="editarPressaoUI(${x.row})" aria-label="Editar">✎</button><button class="mini ghost" style="color:var(--bad)" onclick="excluirPressaoUI(${x.row}, this)" aria-label="Apagar">✕</button></div></div>`; }).join('');
+  return `<div class="grid">
+    <div class="card kpi c4"><div class="lbl">Última medição</div><div class="val ${c ? c[1] : ''}">${m ? m[0] + '/' + m[1] : '—'}</div><div class="sub">${ult ? esc(c[0]) + ' · ' + ddmm(ult.d) + (ult.hora ? ' ' + ult.hora : '') : 'nenhuma medição ainda'}</div></div>
+    <div class="card kpi c4"><div class="lbl">Média de 30 dias</div><div class="val">${ult30.length ? Math.round(media(ult30.map(x => x[0]))) + '/' + Math.round(media(ult30.map(x => x[1]))) : '—'}</div><div class="sub">${ult30.length} medição(ões) · alvo abaixo de 130/80</div></div>
+    <div class="card kpi c4"><div class="lbl">Nesta semana</div><div class="val ${sem >= 2 ? 'pos' : 'wrn'}">${sem}/2</div><div class="sub">medir 2x por semana, de manhã</div></div>
+    ${c && c[2] >= 5 ? `<div class="card c12" style="border-color:var(--bad)"><h3 style="color:var(--bad)">⚠️ Pressão muito alta</h3><p style="margin:0">Acima de 180/110, ou com dor no peito, falta de ar ou dor de cabeça forte: pronto-socorro.</p></div>` : ''}
+    <div class="card c8"><h3>Evolução <small>média de cada medição · linhas em 130/80</small></h3><div class="chart"><canvas id="chPA"></canvas></div></div>
+    <div class="card c4"><h3>Como medir</h3><div style="color:var(--ink2);font-size:13.5px;line-height:1.55">De manhã, antes do café e de remédios. Sentado há 5 minutos, costas apoiadas, braço na altura do coração, sem falar. Faça 2 leituras com 1 minuto de intervalo.</div>
+      <button class="go" style="margin-top:14px" onclick="irSaude('pressao')">Registrar pressão</button></div>
+    <div class="card c12"><h3>Medições</h3>${lista || '<div class="empty">Nenhuma medição ainda.</div>'}</div>
+  </div>`;
+}
+
+function htmlExames() {
+  const S = SAU(), p = S.prog;
+  if (!p) return '<div class="grid"><div class="card c12"><div class="empty">Configure o programa primeiro (aba Programa).</div></div></div>';
+  const marcos = [['inicio', 'Início', p.inicio], ['sem12', 'Sem. ' + p.sem1, addDias(p.inicio, 7 * p.sem1)], ['m6', '6 meses', addDias(p.inicio, 182)], ['a1', '1 ano', addDias(p.inicio, 365)]];
+  const linhas = S.exames.map(e => `<tr class="lk" style="cursor:pointer" onclick="editarExameUI(${e.row})"><td><b>${esc(e.nome)}</b><div style="font-size:11.5px;color:var(--ink3)">${esc([e.unidade, e.alvo].filter(Boolean).join(' · alvo '))}</div></td>${marcos.map(mk => `<td class="o">${esc(e[mk[0]] || '—')}</td>`).join('')}</tr>`).join('');
+  return `<div class="grid"><div class="card c12"><h3>Exames <small>toque num exame para lançar o resultado</small></h3>
+    <div style="overflow-x:auto" data-noswipe><table style="min-width:560px"><thead><tr><th>Exame</th>${marcos.map(mk => `<th>${mk[1]}<div style="font-weight:400;font-size:10.5px">${ddmm(mk[2])}</div></th>`).join('')}</tr></thead><tbody>${linhas}</tbody></table></div>
+    <button class="mini ghost" style="margin-top:12px" onclick="irSaude('exames', { ex: {} })">+ Adicionar exame</button></div></div>`;
+}
+
+function graficosSaude() {
+  if (!window.Chart) return;
+  const S = SAU(), p = S.prog;
+  if ($('#chPeso') && p) {
+    const k = Math.max(0, semanaProg(p, D.hoje)), ate = Math.min(52, Math.max(p.sem1, k + 6)), sems = [...Array(ate + 1).keys()];
+    charts.peso = new Chart($('#chPeso'), {
+      type: 'line',
+      data: { labels: sems.map(j => 'S' + j), datasets: [
+        { label: 'Peso real', data: sems.map(j => j <= k ? pesoDaSemana(p, j) : null), borderColor: C.neon, backgroundColor: C.neon, spanGaps: true, tension: 0, pointRadius: 3, borderWidth: 2 },
+        { label: 'Meta', data: sems.map(j => pesoMetaSemana(p, j)), borderColor: C.ink2, borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, tension: 0 }
+      ] },
+      options: opt({ y: { beginAtZero: false, ticks: { callback: v => num(v) + ' kg' } } }, v => num(v, 1) + ' kg')
+    });
+  }
+  if ($('#chPA')) {
+    const L = S.pressao.slice(-20);
+    charts.pa = new Chart($('#chPA'), {
+      type: 'line',
+      data: { labels: L.map(x => ddmm(x.d)), datasets: [
+        { label: 'Sistólica', data: L.map(x => mediaPA(x)[0]), borderColor: C.s2, backgroundColor: C.s2, tension: 0, pointRadius: 3, borderWidth: 2 },
+        { label: 'Diastólica', data: L.map(x => mediaPA(x)[1]), borderColor: C.s1, backgroundColor: C.s1, tension: 0, pointRadius: 3, borderWidth: 2 },
+        { label: '130', data: L.map(() => 130), borderColor: 'rgba(192,38,211,.35)', borderDash: [4, 4], borderWidth: 1, pointRadius: 0 },
+        { label: '80', data: L.map(() => 80), borderColor: 'rgba(11,165,196,.35)', borderDash: [4, 4], borderWidth: 1, pointRadius: 0 }
+      ] },
+      options: opt({ y: { beginAtZero: false, suggestedMin: 60, suggestedMax: 160 } }, v => num(v) + ' mmHg')
+    });
+  }
+}
+
+/* ---- Registrar › Saúde ---- */
+const hojeHora = () => { const d = new Date(); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+function formSaude() {
+  R.sau = R.sau || { modo: SAU().prog ? 'pesagem' : 'programa' };
+  const S = SAU(), p = S.prog, m = p ? R.sau.modo : 'programa';
+  const seg0 = `<div class="seg full" style="margin-bottom:14px">${[['pesagem', 'Pesagem'], ['pressao', 'Pressão'], ['exames', 'Exames'], ['programa', 'Programa'], ['iphone', 'iPhone']].map(x => `<button type="button" class="${m === x[0] ? 'on' : ''}" ${!p && x[0] !== 'programa' ? 'disabled' : ''} onclick="guardarCampos();R.sau={modo:'${x[0]}'};renderRegistrar()">${x[1]}</button>`).join('')}</div>`;
+  if (m === 'pesagem') {
+    const r = R.sw = R.sw && R.sw._ok ? R.sw : { _ok: 1, d: F.hoje, peso: '', cintura: '', obs: '' };
+    const lista = S.medidas.slice().reverse().slice(0, 10).map(x => `<div class="row ${r.row === x.row ? 'sel' : ''}"><div><span class="t">${x.peso != null ? num(x.peso, 1) + ' kg' : ''}${x.peso != null && x.cintura != null ? ' · ' : ''}${x.cintura != null ? num(x.cintura, 1) + ' cm' : ''}</span><div class="m">${ddmm(x.d)}${x.obs ? ' · ' + esc(x.obs) : ''}</div></div>
+      <div class="v" style="display:flex;gap:6px"><button class="mini ghost" onclick="editarPesagemUI(${x.row})" aria-label="Editar">✎</button><button class="mini ghost" style="color:var(--bad)" onclick="excluirPesagemUI(${x.row}, this)" aria-label="Apagar">✕</button></div></div>`).join('');
+    return seg0 + `<div class="card ${r.row ? 'editando' : ''}"><h3>${r.row ? 'Corrigir pesagem' : 'Pesagem'} <small>toda segunda, ao acordar, depois do banheiro</small>${r.row ? ' <button class="go2" onclick="R.sw=null;renderRegistrar()">cancelar ›</button>' : ''}</h3><div class="f">
+      <div class="f2"><div class="fl"><label>Peso (kg)</label><input class="in big" inputmode="decimal" placeholder="0,0" ${campo('sw', 'peso')}></div>
+        <div class="fl"><label>Cintura (cm)</label><input class="in big" inputmode="decimal" placeholder="opcional" ${campo('sw', 'cintura')}></div></div>
+      <div class="f2"><div class="fl"><label>Data</label><input class="in" type="date" ${campo('sw', 'd')}></div>
+        <div class="fl"><label>Observação</label><input class="in" placeholder="opcional" ${campo('sw', 'obs')}></div></div>
+      <button class="go" onclick="salvarPesagemUI(this)">${r.row ? 'Salvar correção' : 'Registrar pesagem'}</button></div></div>
+      <div class="card" style="margin-top:14px"><h3>Últimas pesagens</h3>${lista || '<div class="empty">Nenhuma pesagem ainda.</div>'}</div>`;
+  }
+  if (m === 'pressao') {
+    const r = R.spa = R.spa && R.spa._ok ? R.spa : { _ok: 1, d: F.hoje, hora: hojeHora(), s1: '', d1: '', s2: '', d2: '', obs: '' };
+    return seg0 + `<div class="card ${r.row ? 'editando' : ''}"><h3>${r.row ? 'Corrigir medição' : 'Pressão'} <small>sentado há 5 min, 2 leituras</small>${r.row ? ' <button class="go2" onclick="R.spa=null;renderRegistrar()">cancelar ›</button>' : ''}</h3><div class="f">
+      <div class="lb">1ª leitura</div>
+      <div class="f2"><div class="fl"><label>Máxima (sistólica)</label><input class="in big" inputmode="numeric" placeholder="120" ${campo('spa', 's1')}></div>
+        <div class="fl"><label>Mínima (diastólica)</label><input class="in big" inputmode="numeric" placeholder="80" ${campo('spa', 'd1')}></div></div>
+      <div class="lb">2ª leitura <small style="font-weight:400;text-transform:none;letter-spacing:0">1 minuto depois</small></div>
+      <div class="f2"><div class="fl"><label>Máxima</label><input class="in" inputmode="numeric" placeholder="opcional" ${campo('spa', 's2')}></div>
+        <div class="fl"><label>Mínima</label><input class="in" inputmode="numeric" placeholder="opcional" ${campo('spa', 'd2')}></div></div>
+      <div class="f2"><div class="fl"><label>Data</label><input class="in" type="date" ${campo('spa', 'd')}></div>
+        <div class="fl"><label>Hora</label><input class="in" type="time" ${campo('spa', 'hora')}></div></div>
+      <div class="fl"><label>Observação</label><input class="in" placeholder="opcional (ex.: antes do remédio)" ${campo('spa', 'obs')}></div>
+      <button class="go" onclick="salvarPressaoUI(this)">${r.row ? 'Salvar correção' : 'Registrar pressão'}</button>
+      <small style="color:var(--ink3)">Acima de 180/110, ou com dor no peito, falta de ar ou dor de cabeça forte: pronto-socorro.</small></div></div>`;
+  }
+  if (m === 'exames') {
+    const e = R.sau.ex;
+    if (e) {
+      R.sx = R.sx && R.sx._id === (e.row || 'novo') ? R.sx : { _id: e.row || 'novo', row: e.row || null, nome: e.nome || '', unidade: e.unidade || '', alvo: e.alvo || '', inicio: e.inicio || '', sem12: e.sem12 || '', m6: e.m6 || '', a1: e.a1 || '' };
+      return seg0 + `<div class="card editando"><h3>${e.row ? esc(e.nome) : 'Novo exame'} <button class="go2" onclick="R.sau={modo:'exames'};R.sx=null;renderRegistrar()">voltar ›</button></h3><div class="f">
+        ${e.row ? '' : `<div class="fl"><label>Exame</label><input class="in" placeholder="ex.: PSA" ${campo('sx', 'nome')}></div>`}
+        <div class="f2"><div class="fl"><label>Unidade</label><input class="in" ${campo('sx', 'unidade')}></div><div class="fl"><label>Alvo</label><input class="in" ${campo('sx', 'alvo')}></div></div>
+        <div class="f2"><div class="fl"><label>Início (${ddmm(p.inicio)})</label><input class="in" ${campo('sx', 'inicio')}></div>
+          <div class="fl"><label>Semana ${p.sem1} (${ddmm(addDias(p.inicio, 7 * p.sem1))})</label><input class="in" ${campo('sx', 'sem12')}></div></div>
+        <div class="f2"><div class="fl"><label>6 meses (${ddmm(addDias(p.inicio, 182))})</label><input class="in" ${campo('sx', 'm6')}></div>
+          <div class="fl"><label>1 ano (${ddmm(addDias(p.inicio, 365))})</label><input class="in" ${campo('sx', 'a1')}></div></div>
+        <button class="go" onclick="salvarExameUI(this)">Salvar</button>
+        ${e.row ? `<button class="mini ghost" style="color:var(--bad)" onclick="excluirExameUI(${e.row}, this)">Remover este exame da lista</button>` : ''}</div></div>`;
+    }
+    return seg0 + `<div class="card"><h3>Exames <small>toque para lançar o resultado</small></h3>${S.exames.map(x => `<div class="row lk" onclick="editarExameUI(${x.row})"><div><span class="t">${esc(x.nome)}</span><div class="m">${esc([x.unidade, x.alvo ? 'alvo ' + x.alvo : ''].filter(Boolean).join(' · '))}</div></div><div class="v">${esc(x.a1 || x.m6 || x.sem12 || x.inicio || '—')} <span class="ed">✎</span></div></div>`).join('') || '<div class="empty">Nenhum exame.</div>'}
+      <button class="mini ghost" style="margin-top:12px" onclick="irSaude('exames', { ex: {} })">+ Adicionar exame</button></div>`;
+  }
+  if (m === 'iphone') return seg0 + htmlAtalho();
+  // programa
+  const v = (x, d) => x == null || x === '' ? d : x;
+  R.spg = R.spg && R.spg._ok ? R.spg : { _ok: 1, altura: fmtIn(v(p && p.altura, '')), pesoIni: fmtIn(v(p && p.pesoIni, '')), inicio: v(p && p.inicio, F.hoje), meta1: fmtIn(v(p && p.meta1, '')),
+    sem1: String(v(p && p.sem1, 12)), metaFinal: fmtIn(v(p && p.metaFinal, '')), r1: fmtIn(+(v(p && p.r1, 0.01) * 100).toFixed(3)), r2: fmtIn(+(v(p && p.r2, 0.0045) * 100).toFixed(3)),
+    passosIni: String(v(p && p.passosIni, 7000)), passosFim: String(v(p && p.passosFim, 12000)), kcalMax: String(v(p && p.kcalMax, 2300)), protMin: String(v(p && p.protMin, 160)),
+    passosMin: String(v(p && p.passosMin, 7000)), sonoMin: fmtIn(v(p && p.sonoMin, 7)), cinturaMeta: fmtIn(v(p && p.cinturaMeta, 102)) };
+  return seg0 + `<div class="card"><h3>Programa de saúde <small>as metas de cada semana saem daqui</small></h3><div class="f">
+    <div class="f2"><div class="fl"><label>Altura (m)</label><input class="in" inputmode="decimal" placeholder="1,86" ${campo('spg', 'altura')}></div>
+      <div class="fl"><label>Peso inicial (kg)</label><input class="in" inputmode="decimal" ${campo('spg', 'pesoIni')}></div></div>
+    <div class="fl"><label>Data de início</label><input class="in" type="date" ${campo('spg', 'inicio')}></div>
+    <div class="lb">Fase intensiva</div>
+    <div class="f2"><div class="fl"><label>Semanas</label><input class="in" inputmode="numeric" ${campo('spg', 'sem1')}></div>
+      <div class="fl"><label>Ritmo (% do peso por semana)</label><input class="in" inputmode="decimal" ${campo('spg', 'r1')}></div></div>
+    <div class="fl"><label>Peso-meta ao fim da fase (kg)</label><input class="in" inputmode="decimal" ${campo('spg', 'meta1')}></div>
+    <div class="lb">Depois</div>
+    <div class="f2"><div class="fl"><label>Ritmo (% por semana)</label><input class="in" inputmode="decimal" ${campo('spg', 'r2')}></div>
+      <div class="fl"><label>Meta final (kg)</label><input class="in" inputmode="decimal" ${campo('spg', 'metaFinal')}></div></div>
+    <div class="lb">Regras do dia (pontos)</div>
+    <div class="f2"><div class="fl"><label>Calorias até (kcal)</label><input class="in" inputmode="numeric" ${campo('spg', 'kcalMax')}></div>
+      <div class="fl"><label>Proteína mínima (g)</label><input class="in" inputmode="numeric" ${campo('spg', 'protMin')}></div></div>
+    <div class="f2"><div class="fl"><label>Passos mínimos</label><input class="in" inputmode="numeric" ${campo('spg', 'passosMin')}></div>
+      <div class="fl"><label>Sono mínimo (h)</label><input class="in" inputmode="decimal" ${campo('spg', 'sonoMin')}></div></div>
+    <div class="lb">Metas de passos e cintura</div>
+    <div class="f2"><div class="fl"><label>Passos na semana 1</label><input class="in" inputmode="numeric" ${campo('spg', 'passosIni')}></div>
+      <div class="fl"><label>Passos no fim da fase</label><input class="in" inputmode="numeric" ${campo('spg', 'passosFim')}></div></div>
+    <div class="fl"><label>Cintura abaixo de (cm)</label><input class="in" inputmode="decimal" ${campo('spg', 'cinturaMeta')}></div>
+    <button class="go" onclick="salvarProgramaUI(this)">${p ? 'Salvar programa' : 'Criar programa'}</button>
+    <small style="color:var(--ink3)">Valide as metas com seu médico. Mudar o programa recalcula todas as semanas.</small></div></div>`;
+}
+
+function htmlAtalho() {
+  const a = R.sau.atalho;
+  if (a === undefined) { R.sau.atalho = null; rpc('lerAtalhoPassos').then(x => { R.sau.atalho = x || false; if (formAtual === 'saude' && R.sau.modo === 'iphone') renderRegistrar(); }).catch(() => {}); return '<div class="card"><div class="empty">Carregando…</div></div>'; }
+  if (!a) return `<div class="card"><h3>Passos automáticos do iPhone</h3><div class="f">
+    <p style="margin:0;color:var(--ink2);line-height:1.55">Crie um link secreto. Uma automação do app <b>Atalhos</b> do iPhone lê os passos do app Saúde e manda para cá sozinha, todo dia. Você não digita mais os passos.</p>
+    <button class="go" onclick="gerarAtalhoUI(this)">Criar link do Atalhos</button></div></div>`;
+  const copiar = (rot, val) => `<div class="fl"><label>${rot}</label><div style="display:flex;gap:8px"><input class="in" readonly value="${esc(val)}" style="font-size:12px" onclick="this.select()"><button class="mini" type="button" onclick="copiarTexto(this.previousElementSibling.value)">Copiar</button></div></div>`;
+  return `<div class="card"><h3>Passos automáticos do iPhone</h3><div class="f">
+    ${copiar('1 · URL', a.url)}${copiar('2 · Cabeçalho apikey', a.chave)}${copiar('3 · Seu link secreto (p_token)', a.token)}
+    <div style="color:var(--ink2);font-size:13.5px;line-height:1.6">
+      <b>No app Atalhos do iPhone</b>
+      <ol style="margin:6px 0 0;padding-left:20px">
+        <li>Aba <b>Automação</b> › <b>+</b> › <b>Hora do Dia</b> › 23:45 › Diariamente › <b>Executar Imediatamente</b> › Seguinte.</li>
+        <li>Toque em <b>Novo Atalho em Branco</b> e adicione a ação <b>Encontrar Amostras de Saúde</b>: Tipo <b>Passos</b>, filtro <b>Data de Início</b> <b>é hoje</b>.</li>
+        <li>Adicione <b>Calcular Estatísticas</b> › <b>Soma</b> das amostras.</li>
+        <li>Adicione <b>Obter Conteúdo do URL</b> e cole a URL (1). Toque em <b>Mostrar Mais</b>: Método <b>POST</b>.</li>
+        <li>Em <b>Cabeçalhos</b>, adicione <b>apikey</b> com a chave (2).</li>
+        <li>Em <b>Corpo da Solicitação</b> escolha <b>JSON</b> e adicione dois campos: <b>p_token</b> (Texto) com o seu link secreto (3) e <b>p_passos</b> (Número) com a <b>Soma</b> da etapa 3.</li>
+        <li>Toque no ▶ para testar: deve aparecer "LIFE DASH: N passos em dd/mm".</li>
+      </ol>
+      <p style="margin:10px 0 0">Pode rodar quantas vezes quiser no dia: o valor é substituído, não somado. Se o link vazar, gere outro aqui; o antigo para de funcionar.</p>
+    </div>
+    <button class="mini ghost" style="color:var(--bad)" onclick="if(confirm('Gerar um link novo? O antigo para de funcionar e você vai precisar atualizar o atalho.'))gerarAtalhoUI(this)">Gerar link novo</button></div></div>`;
+}
+function copiarTexto(t) { try { navigator.clipboard.writeText(t).then(() => toast('✓ Copiado')).catch(() => toast('Toque e segure no campo para copiar', true)); } catch (e) { toast('Toque e segure no campo para copiar', true); } }
+async function gerarAtalhoUI(b) { b.disabled = true; try { const r = await rpc('gerarAtalhoPassos'); R.sau.atalho = r; renderRegistrar(); toast('✓ ' + r.msg); } catch (e) { b.disabled = false; toast('Erro: ' + e, true); } }
+
+function aplicarSaude(r) { if (r && r.saude) { if (D) D.saude = r.saude; if (F) F.saude = r.saude; velho = true; } return r && r.msg ? r.msg : r; }
+async function acaoSaude(b, fn, args, depois) {
+  guardarCampos(); b.disabled = true;
+  try { const r = await rpc(fn, args); const m = aplicarSaude(r); if (depois) depois(r); renderRegistrar(); toast('✓ ' + m, false, true); agendarAtualizacao(); return r; }
+  catch (e) { b.disabled = false; toast('Erro: ' + e, true); }
+}
+function salvarPesagemUI(b) { guardarCampos(); const r = R.sw; acaoSaude(b, 'salvarPesagem', { row: r.row || null, d: r.d || F.hoje, peso: parseBR(r.peso), cintura: parseBR(r.cintura), obs: r.obs || '' }, () => { R.sw = null; }); }
+function editarPesagemUI(row) { const x = SAU().medidas.find(m => m.row === row); if (!x) return; R.sw = { _ok: 1, row, d: x.d, peso: fmtIn(x.peso == null ? '' : x.peso), cintura: fmtIn(x.cintura == null ? '' : x.cintura), obs: x.obs }; renderRegistrar(); window.scrollTo({ top: 0 }); }
+function excluirPesagemUI(row, b) { const x = SAU().medidas.find(m => m.row === row); if (!x || !confirm('Apagar a pesagem de ' + ddmm(x.d) + '?')) return; acaoSaude(b, 'excluirPesagem', { row }, () => { if (R.sw && R.sw.row === row) R.sw = null; }); }
+function salvarPressaoUI(b) {
+  guardarCampos(); const r = R.spa;
+  acaoSaude(b, 'salvarPressao', { row: r.row || null, d: r.d || F.hoje, hora: r.hora || '', s1: parseBR(r.s1), d1: parseBR(r.d1), s2: parseBR(r.s2), d2: parseBR(r.d2), obs: r.obs || '' }, res => {
+    R.spa = null;
+    if (res && res.media) { const c = classePA(res.media[0], res.media[1]); setTimeout(() => { if (c[2] >= 5) alert('⚠️ ' + res.media[0] + '/' + res.media[1] + ' · ' + c[0] + '\n\nPelo seu plano: acima de 180/110, ou com dor no peito, falta de ar ou dor de cabeça forte, procure o pronto-socorro.'); else toast('✓ ' + res.media[0] + '/' + res.media[1] + ' · ' + c[0], c[2] >= 3); }, 900); }
+  });
+}
+function editarPressaoUI(row) { const x = SAU().pressao.find(m => m.row === row); if (!x) return; R.sau = { modo: 'pressao' }; R.spa = { _ok: 1, row, d: x.d, hora: x.hora, s1: x.s1, d1: x.d1, s2: x.s2 == null ? '' : x.s2, d2: x.d2 == null ? '' : x.d2, obs: x.obs }; irPara('registrar', 'saude'); }
+function excluirPressaoUI(row, b) {
+  const x = SAU().pressao.find(m => m.row === row); if (!x || !confirm('Apagar a medição de ' + ddmm(x.d) + '?')) return;
+  b.disabled = true;
+  rpc('excluirPressao', { row }).then(r => { toast('✓ ' + aplicarSaude(r), false, true); renderTudo(); montarAba(abaAtual); agendarAtualizacao(); }).catch(e => { b.disabled = false; toast('Erro: ' + e, true); });
+}
+function editarExameUI(row) { const e = SAU().exames.find(x => x.row === row); if (!e) return; R.sx = null; R.sau = { modo: 'exames', ex: e }; irPara('registrar', 'saude'); }
+function salvarExameUI(b) { guardarCampos(); const r = R.sx; acaoSaude(b, 'salvarExame', { row: r.row, nome: r.row ? R.sau.ex.nome : r.nome, unidade: r.unidade, alvo: r.alvo, inicio: r.inicio, sem12: r.sem12, m6: r.m6, a1: r.a1 }, () => { R.sau = { modo: 'exames' }; R.sx = null; }); }
+function excluirExameUI(row, b) { const e = SAU().exames.find(x => x.row === row); if (!e || !confirm('Remover "' + e.nome + '" da lista de exames?')) return; acaoSaude(b, 'excluirExame', { row }, () => { R.sau = { modo: 'exames' }; R.sx = null; }); }
+function salvarProgramaUI(b) {
+  guardarCampos(); const r = R.spg, n = k => parseBR(r[k]);
+  acaoSaude(b, 'salvarProgramaSaude', { altura: n('altura'), pesoIni: n('pesoIni'), inicio: r.inicio, meta1: n('meta1'), sem1: n('sem1'), metaFinal: n('metaFinal'), r1: n('r1'), r2: n('r2'),
+    passosIni: n('passosIni'), passosFim: n('passosFim'), kcalMax: n('kcalMax'), protMin: n('protMin'), passosMin: n('passosMin'), sonoMin: n('sonoMin'), cinturaMeta: n('cinturaMeta') }, () => { R.spg = null; R.sau = { modo: 'pesagem' }; });
+}
+
+/* ---- bloco Saúde no Meu dia ---- */
+function blocoSaudeDia(r) {
+  const p = SAU().prog; if (!p) return '';
+  const tg = (c, rot) => `<div class="tog"><span class="t">${rot}</span><button type="button" class="sw ${r[c] ? 'on' : ''}" aria-pressed="${!!r[c]}" onclick="togDia('${c}')"></button></div>`;
+  return `<div class="habitos" style="border-color:rgba(74,222,128,.25)"><div class="lb">Programa de saúde <small style="text-transform:none;letter-spacing:0;font-weight:400">${(() => { const k = Math.max(0, semanaProg(p, r.d)); return 'semana ' + k + ' · ' + faseSemana(p, k); })()}</small></div>
+    <div class="f2"><div class="fl"><label>Calorias · até ${num(p.kcalMax)}</label><input class="in" inputmode="numeric" placeholder="0" ${campo('di', 'kcal')}></div>
+      <div class="fl"><label>Proteína (g) · ${num(p.protMin)}+</label><input class="in" inputmode="numeric" placeholder="0" ${campo('di', 'proteina')}></div></div>
+    <div class="fl"><label>Passos · meta ${num(passosMetaSemana(p, Math.max(0, semanaProg(p, r.d))))}</label><input class="in" inputmode="numeric" placeholder="${SAU().prog.temAtalho ? 'vem do iPhone' : '0'}" ${campo('di', 'passos')}></div>
+    ${tg('kegel', 'Kegel')}${tg('oro', 'Orofaríngeos')}${tg('alcool0', 'Zero álcool')}${tg('acucar0', 'Zero açúcar')}
+    <div class="fl"><span class="lb">Ereção (1 a 5) <small style="text-transform:none;letter-spacing:0;font-weight:400">só você vê</small></span><div class="seg full">${['1', '2', '3', '4', '5'].map(n => `<button type="button" class="${String(r.erecao) === n ? 'on' : ''}" onclick="setDi('erecao', this.dataset.v)" data-v="${n}">${n}</button>`).join('')}</div></div>
+  </div>`;
+}
+
 function renderProjetos() {
   const ps = projetosOrdenados();
   const ms = ps.map(p => ({ p, m: metricasProjeto(p) }));
@@ -2985,7 +3472,7 @@ function renderGeral() {
       </div>
       <div data-reg="dinheiro"><div class="lb" style="margin-bottom:2px">Maiores gastos</div>${topCats || '<div class="empty">Nenhum gasto neste mês.</div>'}</div></div>
 
-    <div class="card c6"><h3>Fitness <small>últimos 7 dias</small> ${verTudo('fitness')}</h3>
+    <div class="card c6"><h3>Treinos <small>últimos 7 dias</small> ${verTudo('fitness')}</h3>
       <div class="rings3" data-reg="dia">
         ${anel(treinos, alvo('Treinos'), 'Treinos', treinos + '/' + num(alvo('Treinos')))}
         ${anel(kmMes, alvo('Corrida'), 'Km no mês', num(kmMes, 1), 'mg')}
@@ -3172,11 +3659,11 @@ function irForm(f) {
 }
 
 function renderRegistrar() {
-  const abas = [['financas', 'Finanças'], ['dia', 'Meu dia'], ['tarefas', 'Tarefas'], ['projetos', 'Projetos'], ['metas', 'Metas'], ['faculdade', 'Conhecimento'], ['roda', 'Roda da Vida']];
+  const abas = [['financas', 'Finanças'], ['dia', 'Meu dia'], ['saude', 'Saúde'], ['tarefas', 'Tarefas'], ['projetos', 'Projetos'], ['metas', 'Metas'], ['faculdade', 'Conhecimento'], ['roda', 'Roda da Vida']];
   const naFin = FORMS_FIN.indexOf(formAtual) >= 0;
   const sub = '<div class="sub">' + abas.map(a => `<button class="${(a[0] === 'financas' ? naFin : formAtual === a[0]) ? 'on' : ''}" onclick="irForm('${a[0]}')">${a[1]}</button>`).join('') + '</div>'
     + (naFin ? `<div class="seg full" style="margin:0 0 14px">${[['dinheiro', 'Dinheiro'], ['investir', 'Investimento'], ['negocios', 'Negócios']].map(x => `<button type="button" class="${formAtual === x[0] ? 'on' : ''}" onclick="irForm('${x[0]}')">${x[1]}</button>`).join('')}</div>` : '');
-  const corpo = ({ dinheiro: formDinheiro, dia: formDia, tarefas: formTarefas, metas: formMetas, faculdade: formConhecimento, investir: formInvestir, roda: formRoda, projetos: formProjetos, negocios: formNegocios }[formAtual] || formDinheiro)();
+  const corpo = ({ dinheiro: formDinheiro, dia: formDia, tarefas: formTarefas, metas: formMetas, faculdade: formConhecimento, investir: formInvestir, roda: formRoda, projetos: formProjetos, negocios: formNegocios, saude: formSaude }[formAtual] || formDinheiro)();
   $('#tab-registrar').innerHTML = sub + corpo;
 }
 function seg(grupo, campo, opcoes, atual, extra) {
@@ -3261,7 +3748,9 @@ function formDia() {
   R.di = R.di && R.di.d === iso ? R.di : {
     d: iso, treinou: !!d.treinou, tipo: dn.tipo || '', cardio: dn.cardio || '', minCorpo: fmtIn(dn.minCorpo || ''), minCardio: fmtIn(dn.minCardio || ''), km: fmtIn(d.km), agua: d.agua === '' || d.agua == null ? '' : d.agua, sono: fmtIn(d.sono),
     energia: d.energia === '' || d.energia == null ? '' : String(d.energia), leitura: fmtIn(d.leitura), devocional: !!d.devocional,
-    estudo: fmtIn(d.estudo), negocios: fmtIn(d.negocios), obs: d.obs || ''
+    estudo: fmtIn(d.estudo), negocios: fmtIn(d.negocios), obs: d.obs || '',
+    ...(sd => ({ kcal: sd.kcal == null ? '' : sd.kcal, proteina: sd.proteina == null ? '' : sd.proteina, passos: sd.passos == null ? '' : sd.passos, kegel: !!sd.kegel, oro: !!sd.oro,
+      alcool0: !!sd.alcool0, acucar0: !!sd.acucar0, erecao: sd.erecao ? String(sd.erecao) : '' }))(d.saude || saudeDoDia(iso) || {})
   };
   if (!R.dm || R.dmIso !== iso) {
     R.dmIso = iso; R.dm = {}; R.dmb = {};
@@ -3303,6 +3792,7 @@ function formDia() {
       <div class="tog"><span class="t">Devocional</span><button type="button" class="sw ${r.devocional ? 'on' : ''}" aria-pressed="${r.devocional}" onclick="togDia('devocional')"></button></div>
       ${blocoFeitos()}</div>
     ${blocoNumeros()}
+    ${blocoSaudeDia(r)}
     <div class="fl"><label>Observações</label><textarea class="in" data-k="di.obs" placeholder="opcional">${esc(r.obs)}</textarea></div>
     <button class="go" onclick="salvarDiaUI(this)">Salvar dia</button>
     ${d.existe ? `<button class="mini ghost" style="color:var(--bad)" onclick="excluirDiaUI(this)">Apagar o registro de ${ddmm(iso)}</button>` : ''}
@@ -3338,6 +3828,11 @@ function blocoNumeros() {
     `<div class="fl"><label>${esc(m.nome)} hoje (${esc(m.unidade || 'qtd')})${m.periodo === 'Diário' ? ' · meta ' + num(m.alvo, m.alvo % 1 ? 1 : 0) : ' · ' + esc(progTxt(m))}</label><input class="in" inputmode="decimal" placeholder="0" ${campo('dm', 'm' + i)}></div>`).join('');
   return html ? `<div class="lb" style="margin-top:4px">Outras metas</div>${html}` : '';
 }
+function saudePayload(r) {
+  const o = { kcal: parseBR(r.kcal), proteina: parseBR(r.proteina), kegel: !!r.kegel, oro: !!r.oro, alcool0: !!r.alcool0, acucar0: !!r.acucar0, erecao: r.erecao === '' ? '' : Number(r.erecao) };
+  if (String(r.passos) !== '') o.passos = parseBR(r.passos);   // vazio não apaga os passos que vieram do iPhone
+  return o;
+}
 async function salvarDiaUI(b) {
   guardarCampos(); const r = R.di;
   const en = r.energia === '' ? '' : Number(r.energia);
@@ -3347,7 +3842,10 @@ async function salvarDiaUI(b) {
     const m = await rpc('salvarDia', { d: r.d, treinou: r.treinou, tipo: r.treinou ? r.tipo : '', km: r.treinou && r.cardio ? parseBR(r.km) : '',
       cardio: r.treinou ? r.cardio : '', minCardio: r.treinou && r.cardio ? parseBR(r.minCardio) : '', minCorpo: r.treinou && r.tipo ? parseBR(r.minCorpo) : '', agua: parseBR(r.agua), sono: parseBR(r.sono), energia: en,
       leitura: parseBR(r.leitura), devocional: r.devocional, estudo: parseBR(r.estudo), negocios: parseBR(r.negocios), obs: r.obs || '',
-      manuais: manuaisDia().map((m, i) => ({ meta: m.nome, valor: m.fonte === 'Manual: feito' ? (R.dmb[i] ? 1 : 0) : (parseBR(R.dm['m' + i]) || 0) })) });
+      manuais: manuaisDia().map((m, i) => ({ meta: m.nome, valor: m.fonte === 'Manual: feito' ? (R.dmb[i] ? 1 : 0) : (parseBR(R.dm['m' + i]) || 0) })),
+      saude: SAU().prog ? saudePayload(r) : undefined });
+    if (SAU().prog) { const sp = saudePayload(r), ds = SAU().dias, i = ds.findIndex(x => x.d === r.d), v = Object.assign(i >= 0 ? ds[i] : { d: r.d }, sp, { erecao: sp.erecao === '' ? null : sp.erecao });
+      if (i < 0) { ds.push(v); ds.sort((a, b) => a.d < b.d ? -1 : 1); } velho = true; }
     // atualiza o progresso local para o painel refletir na hora
     if (D) { D.progresso = (D.progresso || []).filter(p => !(p.d === r.d && manuaisDia().some(m => m.nome === p.meta)));
       manuaisDia().forEach((m, i) => { const v = m.fonte === 'Manual: feito' ? (R.dmb[i] ? 1 : 0) : (parseBR(R.dm['m' + i]) || 0); if (v) D.progresso.push({ d: r.d, meta: m.nome, valor: v }); }); velho = true; }
