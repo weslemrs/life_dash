@@ -97,6 +97,7 @@ header{display:flex;align-items:center;justify-content:space-between;gap:12px;ma
 .hrit{display:inline-flex;align-items:center;gap:6px;font-size:10.5px;color:var(--ink3);letter-spacing:0;text-transform:none;font-family:'Exo 2'}
 .hrit i{display:inline-block;width:16px;height:7px;border-radius:3px;background:repeating-linear-gradient(-45deg,rgba(226,236,255,.55) 0 2px,rgba(147,164,195,.15) 2px 5px)}
 .bar>i.ok{background:linear-gradient(90deg,#16A34A,var(--good));box-shadow:0 0 10px rgba(74,222,128,.5)}
+.bar>i.gd{background:linear-gradient(90deg,#16A34A,var(--neon));box-shadow:0 0 10px rgba(74,222,128,.4)}
 .bar>i.mg{background:linear-gradient(90deg,var(--s2),var(--neon2));box-shadow:0 0 10px rgba(232,121,249,.45)}
 .row{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center;padding:10px 0;border-bottom:1px solid rgba(147,164,195,.08)}
 .row:last-child{border-bottom:0}
@@ -2224,18 +2225,23 @@ function renderFinancas() {
     return `<tr><td><span class="dot" style="background:${cores[k] || C.ink3}"></span>${esc(c)}</td><td class="o">${brl0(e)}</td><td class="o">${brl0(s)}</td><td class="o ${e - s >= 0 ? 'pos' : 'neg'}">${brl0(e - s)}</td></tr>`;
   }).join('');
 
-  const cats = D.categorias.map(c => ({ c,
-    v: soma(doMes.filter(x => x.tipo === 'Saída' && x.cat === c), x => x.valor),
-    p: soma(doAnt.filter(x => x.tipo === 'Saída' && x.cat === c), x => x.valor) }))
-    .filter(x => x.v > 0 || x.p > 0).sort((a, b) => b.v - a.v);
-  const maxV = Math.max(1, ...cats.map(x => Math.max(x.v, x.p)));
-  const catHtml = cats.map(x => {
-    let chip = '';
-    if (x.p > 0) { const vr = x.v / x.p - 1; chip = Math.abs(vr) < 0.005 ? '' : `<span class="chip ${vr > 0 ? 'up' : 'dn'}" title="vs ${mesLbl(p)}: ${brl(x.p)}">${vr > 0 ? '▲' : '▼'} ${pct(Math.abs(vr))}</span>`; }
-    else if (x.v > 0) chip = '<span class="chip nw">novo</span>';
-    return `<div class="cat" title="${esc(x.c)} · ${mesLbl(m)}: ${brl(x.v)} · ${mesLbl(p)}: ${brl(x.p)}"><div class="n">${esc(x.c)}</div>
-      <div class="bar"><i class="mg" style="width:${(x.v / maxV * 100).toFixed(1)}%"></i></div><div class="r">${brl0(x.v)}${chip}</div></div>`;
-  }).join('') || '<div class="empty">Nenhuma saída neste mês.</div>';
+  // barras por categoria (saídas e entradas): agrupa pelo que foi lançado, então categoria nova ou antiga também aparece
+  const catBarras = (tipo, cls, vazio) => {
+    const somaCat = l => l.filter(x => x.tipo === tipo).reduce((o, x) => { const k = x.cat || 'Sem categoria'; o[k] = (o[k] || 0) + x.valor; return o; }, {});
+    const a = somaCat(doMes), b = somaCat(doAnt);
+    const cs = [...new Set([...Object.keys(a), ...Object.keys(b)])].map(c => ({ c, v: a[c] || 0, p: b[c] || 0 }))
+      .filter(x => x.v > 0 || x.p > 0).sort((x, y) => y.v - x.v || y.p - x.p);
+    const maxV = Math.max(1, ...cs.map(x => Math.max(x.v, x.p)));
+    return cs.map(x => {
+      let chip = '';
+      if (x.p > 0) { const vr = x.v / x.p - 1; chip = Math.abs(vr) < 0.005 ? '' : `<span class="chip ${(vr > 0) === (tipo === 'Saída') ? 'up' : 'dn'}" title="vs ${mesLbl(p)}: ${brl(x.p)}">${vr > 0 ? '▲' : '▼'} ${pct(Math.abs(vr))}</span>`; }
+      else if (x.v > 0) chip = '<span class="chip nw">novo</span>';
+      return `<div class="cat" title="${esc(x.c)} · ${mesLbl(m)}: ${brl(x.v)} · ${mesLbl(p)}: ${brl(x.p)}"><div class="n">${esc(x.c)}</div>
+      <div class="bar"><i class="${cls}" style="width:${(x.v / maxV * 100).toFixed(1)}%"></i></div><div class="r">${brl0(x.v)}${chip}</div></div>`;
+    }).join('') || `<div class="empty">${vazio}</div>`;
+  };
+  const catHtml = catBarras('Saída', 'mg', 'Nenhuma saída neste mês.');
+  const catEntHtml = catBarras('Entrada', 'gd', 'Nenhuma entrada neste mês.');
 
   // investimentos por aplicação
   const aps = (D.aplicacoes || []).filter(a => a.ativa || a.estimado > 0);
@@ -2286,8 +2292,9 @@ function renderFinancas() {
     <div class="card kpi c3"><div class="lbl">Investido no mês</div><div class="val ${aportes < 0 ? 'neg' : ''}">${aportes < 0 ? '− ' : ''}${brl0(Math.abs(aportes))}</div>
       <div class="sub">${subInv(iv)}${entPessoal && aportes > 0 ? ' · ' + pct(aportes / entPessoal) + ' das entradas' : ''}${metaAporte ? ' · meta ' + pct(metaAporte) : ''}</div></div>
 
-    <div class="card c8"><h3>Saídas por categoria <small>vs ${mesLbl(p)}</small></h3>${catHtml}<div class="legend"><span><span class="chip up" style="margin:0 6px 0 0">▲</span>gastou mais</span><span><span class="chip dn" style="margin:0 6px 0 0">▼</span>gastou menos</span><span><span class="chip nw" style="margin:0 6px 0 0">novo</span>sem gasto no mês anterior</span></div></div>
-    <div class="card c4"><h3>Por conta</h3><table><thead><tr><th>Conta</th><th>Entrou</th><th>Saiu</th><th>Saldo</th></tr></thead><tbody>${contas}</tbody></table></div>
+    <div class="card c6"><h3>Saídas por categoria <small>vs ${mesLbl(p)}</small></h3>${catHtml}<div class="legend"><span><span class="chip up" style="margin:0 6px 0 0">▲</span>gastou mais</span><span><span class="chip dn" style="margin:0 6px 0 0">▼</span>gastou menos</span><span><span class="chip nw" style="margin:0 6px 0 0">novo</span>sem gasto no mês anterior</span></div></div>
+    <div class="card c6"><h3>Entradas por categoria <small>vs ${mesLbl(p)}</small></h3>${catEntHtml}<div class="legend"><span><span class="chip dn" style="margin:0 6px 0 0">▲</span>entrou mais</span><span><span class="chip up" style="margin:0 6px 0 0">▼</span>entrou menos</span><span><span class="chip nw" style="margin:0 6px 0 0">novo</span>sem entrada no mês anterior</span></div></div>
+    <div class="card c12"><h3>Por conta</h3><table><thead><tr><th>Conta</th><th>Entrou</th><th>Saiu</th><th>Saldo</th></tr></thead><tbody>${contas}</tbody></table></div>
 
     <div class="card c12"><h3>Entradas × saídas <small>12 meses</small></h3><div class="chart"><canvas id="chTrend"></canvas></div></div>
 
@@ -3678,7 +3685,7 @@ const campo = (g, c, attrs) => `data-k="${g}.${c}" value="${esc(R[g][c] == null 
 /* ---- Dinheiro ---- */
 function formDinheiro() {
   const r = R.din; r.d = r.d || F.hoje;
-  const cats = r.tipo === 'Entrada' ? F.catEntrada : F.catSaida;
+  const cats = [...((r.tipo === 'Entrada' ? F.catEntrada : F.catSaida) || [])].sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
   if (cats.indexOf(r.cat) < 0) r.cat = '';
   const ed = r.edit;
   return `<div class="card" id="saldoDin" style="margin-bottom:14px">${saldoMesHtml()}</div>
