@@ -133,6 +133,13 @@ header{display:flex;align-items:center;justify-content:space-between;gap:12px;ma
 @media (min-width:700px){#mtr{align-items:center}#mtr .sh{border-radius:22px;border-bottom:1px solid var(--line2)}}
 #mtr .hd2{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 #mtr .hd2 b{font-family:'Space Grotesk';font-size:12px;letter-spacing:.18em;color:var(--neon);text-transform:uppercase}
+.cat.lk{cursor:pointer;border-radius:10px;transition:background .15s}.cat.lk:hover{background:rgba(34,211,238,.06)}.cat.lk:active{background:rgba(34,211,238,.1)}
+#mtr .sh.lg{width:min(620px,100%)}
+.cs-mes{display:flex;align-items:center;justify-content:center;gap:12px;margin:0 0 10px}.cs-mes b{font-family:'Space Grotesk';letter-spacing:.12em;font-size:13px;min-width:90px;text-align:center}
+.chips.cs-cats{flex-wrap:nowrap;overflow-x:auto;padding:10px 0 4px;margin:0 -2px;scrollbar-width:thin}.chips.cs-cats button{flex:0 0 auto;white-space:nowrap}
+.chips.cs-cats button small{opacity:.75;font-weight:500;margin-left:4px}
+.cs-kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 6px}.cs-kpi div{border:1px solid var(--line2);border-radius:12px;padding:9px 10px;background:rgba(6,10,22,.45)}
+.cs-kpi span{display:block;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3)}.cs-kpi b{font-family:'Space Grotesk';font-size:15px;display:block;margin-top:3px;white-space:nowrap}
 #mtr .x{all:unset;cursor:pointer;width:34px;height:34px;border-radius:17px;display:flex;align-items:center;justify-content:center;color:var(--ink2);border:1px solid var(--line2)}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink2);margin-top:12px}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
@@ -1829,7 +1836,7 @@ function abrirMetaHoje(nome) {
   if (!$('#mtr')) document.body.insertAdjacentHTML('beforeend', '<div id="mtr" onclick="if(event.target===this)fecharSheet()"><div class="sh" role="dialog" aria-modal="true"></div></div>');
   renderMetaSheet(); requestAnimationFrame(() => $('#mtr').classList.add('on'));
 }
-function fecharSheet() { const x = $('#mtr'); if (x) x.classList.remove('on'); TR = null; MT = null; }
+function fecharSheet() { const x = $('#mtr'); if (x) { x.classList.remove('on'); const sh = x.querySelector('.sh'); if (sh && CS) { sh.classList.remove('lg'); } } TR = null; MT = null; CS = null; }
 function renderMetaSheet() {
   const { m, v } = MT, a = alvoDia(m, D.hoje), agua = m.fonte === 'Meu dia: água';
   const un = agua ? 'ml' : (m.unidade || '');
@@ -2207,6 +2214,47 @@ function listaDin() {
 }
 function atualizarListaDin() { const el = document.getElementById('ultimosDin'); if (el) el.innerHTML = listaDin(); }
 function movAp(k) { const a = (D.aplicacoes || []).filter(a => a.ativa || a.estimado > 0)[k]; if (a) { R.inv.ativo = a.nome; R.inv.novo = false; } irPara('registrar', 'investir'); }
+/* ---- pop-up: lançamentos de uma categoria (alterna categoria, entrada/saída e mês) ---- */
+let CS = null;
+function abrirCat(tipo, cat) {
+  CS = { tipo: tipo === 'Entrada' ? 'Entrada' : 'Saída', cat: cat || '', m: mesSel };
+  if (!$('#mtr')) document.body.insertAdjacentHTML('beforeend', '<div id="mtr" onclick="if(event.target===this)fecharSheet()"><div class="sh" role="dialog" aria-modal="true"></div></div>');
+  $('#mtr .sh').classList.add('lg');
+  renderCatSheet(); requestAnimationFrame(() => $('#mtr').classList.add('on'));
+}
+function fecharCat() { const sh = $('#mtr .sh'); if (sh) sh.classList.remove('lg'); CS = null; fecharSheet(); }
+const catDe = x => x.cat || 'Sem categoria';
+function renderCatSheet() {
+  if (!CS) return;
+  const { tipo, m } = CS, p = addMes(m, -1), ms = mesesDisponiveis(), i = ms.indexOf(m);
+  const doTipo = mm => D.fin.filter(x => x.d.startsWith(mm) && x.tipo === tipo && !ehAj(x));
+  const lm = doTipo(m), la = doTipo(p);
+  const tot = {}; lm.forEach(x => { tot[catDe(x)] = (tot[catDe(x)] || 0) + x.valor; });
+  const cats = Object.keys(tot).sort((a, b) => tot[b] - tot[a]);
+  if (CS.cat && !tot[CS.cat]) CS.cat = cats[0] || '';            // categoria sem lançamento neste mês/tipo → a maior
+  const c = CS.cat, totMes = soma(lm, x => x.valor);
+  const lista = ordenarLanc(c ? lm.filter(x => catDe(x) === c) : lm);
+  const v = soma(lista, x => x.valor), ant = soma(c ? la.filter(x => catDe(x) === c) : la, x => x.valor);
+  const vr0 = ant > 0 ? v / ant - 1 : null, vr = vr0 != null && Math.abs(vr0) < 0.005 ? 0 : vr0, bom = vr != null && ((vr > 0) === (tipo === 'Entrada'));
+  const chip = (k, rot, val) => `<button type="button" class="${k === c ? 'on' : ''}" onclick="CS.cat=this.dataset.c;renderCatSheet()" data-c="${esc(k)}">${esc(rot)}<small>${brl0(val)}</small></button>`;
+  const linhas = lista.map(x => `<div class="row lk" onclick="fecharCat();editarLanc(${x.row})"><div><span class="t">${esc(x.desc || x.cat)}</span>
+      <div class="m">${ddmm(x.d)}${c ? '' : ' · ' + esc(catDe(x))} · ${esc(x.conta)}${x.forma ? ' · ' + esc(x.forma) : ''}</div></div>
+      <div class="v"><span class="${tipo === 'Entrada' ? 'pos' : ''}">${tipo === 'Entrada' ? '+' : '−'} ${brl(x.valor)}</span> <span class="ed">✎</span></div></div>`).join('')
+    || `<div class="empty">Nenhuma ${tipo === 'Entrada' ? 'entrada' : 'saída'} em ${mesLbl(m)}.</div>`;
+  $('#mtr .sh').innerHTML = `<div class="hd2"><b>${c ? esc(c) : 'Todas as ' + (tipo === 'Entrada' ? 'entradas' : 'saídas')}</b><button class="x" onclick="fecharCat()" aria-label="Fechar">✕</button></div>
+    <div class="cs-mes"><button class="arrow" onclick="mudarMesCat(-1)" ${i <= 0 ? 'disabled' : ''} aria-label="Mês anterior">‹</button><b>${mesLbl(m).toUpperCase()}</b><button class="arrow" onclick="mudarMesCat(1)" ${i >= ms.length - 1 ? 'disabled' : ''} aria-label="Próximo mês">›</button></div>
+    <div class="seg full">${['Saída', 'Entrada'].map(t => `<button type="button" class="${t === tipo ? 'on' + (t === 'Saída' ? ' mg' : '') : ''}" onclick="CS.tipo='${t}';CS.cat='';renderCatSheet()">${t === 'Saída' ? 'Saídas' : 'Entradas'}</button>`).join('')}</div>
+    <div class="chips cs-cats" role="tablist">${cats.length ? chip('', 'Todas', totMes) + cats.map(k => chip(k, k, tot[k])).join('') : ''}</div>
+    <div class="cs-kpi"><div><span>Total</span><b class="${tipo === 'Entrada' ? 'pos' : 'neg'}">${brl(v)}</b></div>
+      <div><span>${c ? 'Do mês' : 'Lançamentos'}</span><b>${c ? (totMes ? pct(v / totMes) : '—') : lista.length}</b></div>
+      <div><span>vs ${mesLbl(p)}</span><b class="${vr == null || vr === 0 ? '' : bom ? 'pos' : 'neg'}">${vr == null ? (v > 0 ? 'novo' : '—') : (Math.abs(vr) < 0.005 ? 'igual' : (vr > 0 ? '▲ ' : '▼ ') + pct(Math.abs(vr)))}</b></div></div>
+    <div style="font-size:12px;color:var(--ink3);margin:8px 0 2px">${lista.length} lançamento(s)${lista.length ? ' · média ' + brl(v / lista.length) : ''} · toque para corrigir</div>
+    <div class="cs-lista">${linhas}</div>`;
+  const on = $('#mtr .cs-cats button.on'); if (on) on.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+function mudarMesCat(k) { const ms = mesesDisponiveis(), i = ms.indexOf(CS.m), j = Math.max(0, Math.min(ms.length - 1, i + k)); CS.m = ms[j]; renderCatSheet(); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && CS) fecharCat(); });
+
 function renderFinancas() {
   const m = mesSel, p = addMes(m, -1), ms = mesesDisponiveis(), i = ms.indexOf(m);
   const doMes = D.fin.filter(x => x.d.startsWith(m)), doAnt = D.fin.filter(x => x.d.startsWith(p) && !ehAj(x));
@@ -2236,7 +2284,7 @@ function renderFinancas() {
       let chip = '';
       if (x.p > 0) { const vr = x.v / x.p - 1; chip = Math.abs(vr) < 0.005 ? '' : `<span class="chip ${(vr > 0) === (tipo === 'Saída') ? 'up' : 'dn'}" title="vs ${mesLbl(p)}: ${brl(x.p)}">${vr > 0 ? '▲' : '▼'} ${pct(Math.abs(vr))}</span>`; }
       else if (x.v > 0) chip = '<span class="chip nw">novo</span>';
-      return `<div class="cat" title="${esc(x.c)} · ${mesLbl(m)}: ${brl(x.v)} · ${mesLbl(p)}: ${brl(x.p)}"><div class="n">${esc(x.c)}</div>
+      return `<div class="cat lk" role="button" tabindex="0" data-t="${tipo}" data-c="${esc(x.c)}" onclick="abrirCat(this.dataset.t, this.dataset.c)" onkeydown="if(event.key==='Enter')this.click()" title="Ver os lançamentos de ${esc(x.c)}"><div class="n">${esc(x.c)}</div>
       <div class="bar"><i class="${cls}" style="width:${(x.v / maxV * 100).toFixed(1)}%"></i></div><div class="r">${brl0(x.v)}${chip}</div></div>`;
     }).join('') || `<div class="empty">${vazio}</div>`;
   };
@@ -2292,8 +2340,8 @@ function renderFinancas() {
     <div class="card kpi c3"><div class="lbl">Investido no mês</div><div class="val ${aportes < 0 ? 'neg' : ''}">${aportes < 0 ? '− ' : ''}${brl0(Math.abs(aportes))}</div>
       <div class="sub">${subInv(iv)}${entPessoal && aportes > 0 ? ' · ' + pct(aportes / entPessoal) + ' das entradas' : ''}${metaAporte ? ' · meta ' + pct(metaAporte) : ''}</div></div>
 
-    <div class="card c6"><h3>Saídas por categoria <small>vs ${mesLbl(p)}</small></h3>${catHtml}<div class="legend"><span><span class="chip up" style="margin:0 6px 0 0">▲</span>gastou mais</span><span><span class="chip dn" style="margin:0 6px 0 0">▼</span>gastou menos</span><span><span class="chip nw" style="margin:0 6px 0 0">novo</span>sem gasto no mês anterior</span></div></div>
-    <div class="card c6"><h3>Entradas por categoria <small>vs ${mesLbl(p)}</small></h3>${catEntHtml}<div class="legend"><span><span class="chip dn" style="margin:0 6px 0 0">▲</span>entrou mais</span><span><span class="chip up" style="margin:0 6px 0 0">▼</span>entrou menos</span><span><span class="chip nw" style="margin:0 6px 0 0">novo</span>sem entrada no mês anterior</span></div></div>
+    <div class="card c6"><h3>Saídas por categoria <small>toque para detalhar · vs ${mesLbl(p)}</small></h3>${catHtml}<div class="legend"><span><span class="chip up" style="margin:0 6px 0 0">▲</span>gastou mais</span><span><span class="chip dn" style="margin:0 6px 0 0">▼</span>gastou menos</span><span><span class="chip nw" style="margin:0 6px 0 0">novo</span>sem gasto no mês anterior</span></div></div>
+    <div class="card c6"><h3>Entradas por categoria <small>toque para detalhar · vs ${mesLbl(p)}</small></h3>${catEntHtml}<div class="legend"><span><span class="chip dn" style="margin:0 6px 0 0">▲</span>entrou mais</span><span><span class="chip up" style="margin:0 6px 0 0">▼</span>entrou menos</span><span><span class="chip nw" style="margin:0 6px 0 0">novo</span>sem entrada no mês anterior</span></div></div>
     <div class="card c12"><h3>Por conta</h3><table><thead><tr><th>Conta</th><th>Entrou</th><th>Saiu</th><th>Saldo</th></tr></thead><tbody>${contas}</tbody></table></div>
 
     <div class="card c12"><h3>Entradas × saídas <small>12 meses</small></h3><div class="chart"><canvas id="chTrend"></canvas></div></div>
